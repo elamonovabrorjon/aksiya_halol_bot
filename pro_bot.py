@@ -85,8 +85,7 @@ def handle_all(message):
 
     if text == "🟢 Halol aksiyalar":
         bot.reply_to(message, "🟢 *Halol:* AAPL, TSLA, NVDA, MSFT, JNJ, PFE", parse_mode="Markdown")
-[16.05.2026 19:40] Эламонов Аброржон ФСБ: return
-    elif text == "🔴 Harom aksiyalar":
+     elif text == "🔴 Harom aksiyalar":
         bot.reply_to(message, "🔴 *Harom:* JPM, BAC, NFLX, MCD, HAMKORBANK", parse_mode="Markdown")
         return
     elif text == "🟡 Shubhali aksiyalar":
