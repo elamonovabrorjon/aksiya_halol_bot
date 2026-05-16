@@ -5,9 +5,8 @@ import time
 import finnhub
 import html
 from datetime import datetime, timedelta
-
-# ===================== SOZLAMALAR =====================
-TOKEN = '8781183838:AAH1PA_1Vm7n2SNxU7z0cOjrxrNxSPLgf2c'  
+ # ===================== SOZLAMALAR =====================
+TOKEN = '8781183838:AAEcHw_5d0rDnLFmA07pGFO7y4Uh8ZRTeg8'
 FINNHUB_KEY = 'ctv22h9r01qg80atc9vg'
 
 bot = telebot.TeleBot(TOKEN)
