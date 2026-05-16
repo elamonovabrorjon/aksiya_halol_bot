@@ -11,7 +11,7 @@ TOKEN = '8781183838:AAEcHw_5d0rDnLFmA07pGFO7y4Uh8ZRTeg8'  # Tokeningiz
 FINNHUB_KEY = 'ctv22h9r01qg80atc9vg'
 RENDER_URL = 'https://aksiya-halol-bot.onrender.com'  # Render URL (keyin o'zgartiramiz)
 
-app = Flask(name)
+app = Flask(_name_)
 bot = telebot.TeleBot(TOKEN)
 
 try:
