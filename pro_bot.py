@@ -1,4 +1,4 @@
-[16.05.2026 19:40] Эламонов Аброржон ФСБ: import telebot
+
 from telebot import types
 import yfinance as yf
 import finnhub
