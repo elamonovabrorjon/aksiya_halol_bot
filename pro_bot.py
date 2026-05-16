@@ -77,6 +77,48 @@ def get_rsi(closes, period=14):
         return 50.0, "WAIT"
 
 
+def get_macd(closes):
+    try:
+        ema12 = closes.ewm(span=12, adjust=False).mean()
+        ema26 = closes.ewm(span=26, adjust=False).mean()
+        macd = ema12 - ema26
+        signal = macd.ewm(span=9, adjust=False).mean()
+        if macd.iloc[-1] > signal.iloc[-1]:
+            return "BUY"
+        return "SELL"
+    except:
+        return "WAIT"
+
+
+def get_bollinger(closes):
+    try:
+        sma = closes.rolling(20).mean().iloc[-1]
+        std = closes.rolling(20).std().iloc[-1]
+        upper = sma + 2 * std
+        lower = sma - 2 * std
+        joriy = closes.iloc[-1]
+        if joriy > upper:
+            return "SELL (Yuqori)"
+        elif joriy < lower:
+            return "BUY (Quyi)"
+        return "NORMAL"
+    except:
+        return "NORMAL"
+
+
+def get_fibonacci(closes):
+    try:
+        high = closes.tail(66).max()
+        low = closes.tail(66).min()
+        diff = high - low
+        f382 = round(high - 0.382 * diff, 2)
+        f500 = round(high - 0.500 * diff, 2)
+        f618 = round(high - 0.618 * diff, 2)
+        return f382, f500, f618
+    except:
+        return 0, 0, 0
+
+
 @bot.message_handler(commands=['start'])
 def start(message):
     bot.send_message(
@@ -137,13 +179,31 @@ def handle_all(message):
         valyuta = info.get('currency', 'USD')
         market_cap_raw = info.get('marketCap', 0)
         pe = info.get('trailingPE', 0)
+        pb = info.get('priceToBook', 0)
+        roe = info.get('returnOnEquity', 0)
+        eps = info.get('trailingEps', 0)
+        fcf = info.get('freeCashflow', 0)
+        div = info.get('dividendYield', 0)
+        week52_high = info.get('fiftyTwoWeekHigh', 0)
+        week52_low = info.get('fiftyTwoWeekLow', 0)
+        sektor = info.get('sector', 'Noma\'lum')
+        nom = info.get('longName', tiker)
 
         if market_cap_raw >= 1e12:
-            mc = str(round(market_cap_raw / 1e12, 2)) + "T"
+            mc = str(round(market_cap_raw / 1e12, 2)) + " T"
         elif market_cap_raw >= 1e9:
-            mc = str(round(market_cap_raw / 1e9, 2)) + "B"
+            mc = str(round(market_cap_raw / 1e9, 2)) + " B"
         else:
-            mc = str(round(market_cap_raw / 1e6, 2)) + "M"
+            mc = str(round(market_cap_raw / 1e6, 2)) + " M"
+
+        if fcf >= 1e9:
+            fcf_text = str(round(fcf / 1e9, 2)) + " B"
+        elif fcf >= 1e6:
+            fcf_text = str(round(fcf / 1e6, 2)) + " M"
+        else:
+            fcf_text = str(fcf)
+
+        div_text = str(round(div * 100, 2)) + "%" if div else "Tolmaydi"
 
         tarix = stock.history(period="1y")
         cl = tarix['Close']
@@ -155,6 +215,10 @@ def handle_all(message):
             return 0.0
 
         rsi, rsi_sig = get_rsi(cl)
+        macd_sig = get_macd(cl)
+        bb_sig = get_bollinger(cl)
+        f382, f500, f618 = get_fibonacci(cl)
+
         tp = round(narx * 1.05, 2)
         sl = round(narx * 0.97, 2)
 
@@ -163,41 +227,148 @@ def handle_all(message):
 
         if nisbat < 30:
             h_auto = "HALOL (" + str(nisbat) + "%)"
+            halol_emoji = "HALOL"
         elif nisbat <= 33:
             h_auto = "SHUBHALI (" + str(nisbat) + "%)"
+            halol_emoji = "SHUBHALI"
         else:
             h_auto = "XAROM (" + str(nisbat) + "%)"
+            halol_emoji = "XAROM"
 
         hd = HALOLLIK.get(tiker, {})
-        h_text = hd.get('holat', h_auto)
+        h_text = hd.get('holat', halol_emoji)
         h_sabab = hd.get('sabab', "Qarz nisbati: " + str(nisbat) + "%")
 
-        nom = info.get('longName', tiker)
-        pe_text = str(round(pe, 1)) if pe else "—"
+        try:
+            income = stock.financials.iloc[0, 0]
+            income_text = "Foyda" if income > 0 else "Zarar"
+        except:
+            income_text = "Noma'lum"
 
-        javob = (
-            tiker + " | " + nom + "\n"
-            "Market Cap: " + mc + " | P/E: " + pe_text + "\n\n"
-            "Narx: " + str(narx) + " " + valyuta + "\n\n"
-            "Ozgarish:\n"
-            "1D: " + str(pct(1)) + "% | 1W: " + str(pct(5)) + "%\n"
-            "1M: " + str(pct(22)) + "% | 1Y: " + str(pct(252)) + "%\n\n"
-            "RSI: " + str(rsi) + " -> " + rsi_sig + "\n"
-            "TP: " + str(tp) + " | SL: " + str(sl) + "\n\n"
-            "Shariat: " + h_text + "\n"
-            + h_sabab
-        )
+        ball = 3.0
+        izoh = ""
+        if h_text == "XAROM":
+            ball -= 1.5
+            izoh += "Qarz yuklamasi yuqori. "
+        else:
+            ball += 0.5
+            izoh += "Qarz yuklamasi me'yorda (Halol). "
+        if rsi <= 35:
+            ball += 1.0
+            izoh += "RSI oversold - texnik arzon. "
+        elif rsi >= 65:
+            ball -= 0.5
+            izoh += "RSI (" + str(rsi) + "): Narx muvozanatda. "
+        else:
+            izoh += "RSI (" + str(rsi) + "): Narx muvozanatda. "
+        if pe and pe < 15:
+            ball += 0.5
+            izoh += "P/E past - fundamental arzon. "
+        elif pe and pe > 35:
+            ball -= 0.5
+            izoh += "P/E baland. "
+        if income_text == "Foyda":
+            ball += 0.5
+        else:
+            ball -= 0.5
 
-        news_text = ""
+        ball = max(1.0, min(5.0, ball))
+        yulduzlar = "★" * int(round(ball))
+
+        if ball >= 4.0:
+            baho_text = "ACCUMULATE"
+        elif ball >= 3.0:
+            baho_text = "HOLD"
+        else:
+            baho_text = "AVOID"
+
+        # Wall Street target
+        ws_target = ""
+        try:
+            ws = info.get('targetMeanPrice', 0)
+            if ws:
+                ws_change = round(((ws - narx) / narx) * 100, 2)
+                ws_target = "Wall Street Prognoz: " + str(round(ws, 2)) + " USD (" + str(ws_change) + "%)\n"
+        except:
+            pass
+
+        # Yirik fondlar
+        fondlar_text = ""
+        try:
+            holders = stock.institutional_holders
+            if holders is not None and not holders.empty:
+                fondlar_text = "Yirik Fondlar:\n"
+                for i, row in holders.head(3).iterrows():
+                    nom_f = str(row.get('Holder', ''))
+                    shares = row.get('Shares', 0)
+                    if shares >= 1e6:
+                        shares_text = str(round(shares / 1e6, 2)) + " M"
+                    else:
+                        shares_text = str(shares)
+                    fondlar_text += "  " + nom_f + ": " + shares_text + "\n"
+        except:
+            pass
+
+        # Insayderlar
+        insayder_text = "Insayderlar: Barqaror\n"
+        try:
+            insider = stock.insider_transactions
+            if insider is not None and not insider.empty:
+                insayder_text = "Insayderlar: " + str(len(insider)) + " ta oxirgi tranzaksiya\n"
+        except:
+            pass
+
+        # Yangiliklar
+        news_text = "Yangiliklar: Topilmadi\n"
         if finnhub_client:
             try:
                 news = finnhub_client.company_news(tiker, _from="2024-01-01", to="2099-01-01")
                 if news:
-                    javob = javob + "\n\nYangiliklar:\n"
+                    news_text = "Yangiliklar:\n"
                     for n_item in news[:3]:
-                        javob = javob + "- " + n_item['headline'][:60] + "\n"
+                        news_text += "  - " + n_item['headline'][:60] + "\n"
             except:
                 pass
+
+        javob = (
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            + tiker + " | " + nom + "\n"
+            "Sektor: " + sektor + " | Shariat: " + h_text + " (" + str(nisbat) + "%)\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "Narx: " + str(narx) + " " + valyuta + "\n"
+            "52W M/M: " + str(week52_high) + " / " + str(week52_low) + "\n"
+            "Cap: " + mc + " | Div: " + div_text + "\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "Fundamental Tahlil:\n"
+            "P/E: " + str(round(pe, 2) if pe else "—") + " | " + income_text + "\n"
+            "P/B: " + str(round(pb, 2) if pb else "—") + " | ROE: " + str(round(roe * 100, 2) if roe else "—") + "% | EPS: " + str(round(eps, 2) if eps else "—") + "\n"
+            "FCF: " + fcf_text + "\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "Fibonacci (3M):\n"
+            "  38.2%: " + str(f382) + " USD\n"
+            "  50.0%: " + str(f500) + " USD\n"
+            "  61.8%: " + str(f618) + " USD\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "Dinamika:\n"
+            "1D: " + str(pct(1)) + "% | 1W: " + str(pct(5)) + "% | 1M: " + str(pct(22)) + "%\n"
+            "3M: " + str(pct(66)) + "% | 6M: " + str(pct(132)) + "% | 1Y: " + str(pct(252)) + "%\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "Indikatorlar:\n"
+            "RSI (14): " + str(rsi) + " -> " + rsi_sig + "\n"
+            "MACD: " + macd_sig + " | Bollinger: " + bb_sig + "\n"
+            "TP: " + str(tp) + " | SL: " + str(sl) + "\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            + ws_target
+            + "━━━━━━━━━━━━━━━━━━━━\n"
+            + insayder_text
+            + "━━━━━━━━━━━━━━━━━━━━\n"
+            + fondlar_text
+            + "━━━━━━━━━━━━━━━━━━━━\n"
+            + news_text
+            + "━━━━━━━━━━━━━━━━━━━━\n"
+            "BOT BAHOSI: " + str(round(ball, 1)) + "/5.0 " + yulduzlar + " -> " + baho_text + "\n"
+            "Izoh: " + izoh
+        )
 
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("TradingView", url="https://www.tradingview.com/symbols/" + tiker + "/"))
