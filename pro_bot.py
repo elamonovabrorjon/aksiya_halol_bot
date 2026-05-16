@@ -12,21 +12,23 @@ FINNHUB_KEY = 'ctv22h9r01qg80atc9vg'
 
 bot = telebot.TeleBot(TOKEN)
 
-# Cache
-@lru_cache(maxsize=50)
+# Cache (Tezlikni oshirish va server qotishining oldini olish uchun)
+@lru_cache(maxsize=100)
 def get_stock_data(ticker: str):
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
-        hist_1mo = stock.history(period="1mo")
         hist_1y = stock.history(period="1y")
-        return stock, info, hist_1mo, hist_1y
-    except:
-        return None, None, None, None
+        return stock, info, hist_1y
+    except Exception as e:
+        print(f"Kesh xatosi {ticker}: {e}")
+        return None, None, None
 
 # ===================== INDIKATORLAR =====================
 def hisobla_rsi(closes, period=14):
     try:
+        if closes is None or len(closes) < period:
+            return "—", "Noma'lum"
         delta = closes.diff()
         gain = delta.clip(lower=0)
         loss = -delta.clip(upper=0)
@@ -46,26 +48,40 @@ def hisobla_rsi(closes, period=14):
             signal = "HOLD ↕️"
         return current_rsi, signal
     except:
-        return 50.0, "Noma'lum"
+        return "—", "Noma'lum"
 
 # ===================== ASOSIY TAHLIL =====================
 def aksiya_tahlil(tiker: str):
     try:
-        stock, info, hist_1mo, hist_1y = get_stock_data(tiker.upper())
+        tiker_clean = tiker.strip().upper()
+        stock, info, hist_1y = get_stock_data(tiker_clean)
+        
         if info is None or hist_1y is None or hist_1y.empty:
-            return "❌ Aksiya ma'lumotlari olinmadi. Tiker to'g'ri yozilganiga ishonch hosil qiling (Masalan: NVDA, AAPL).", None
+            return f"❌ <b>{tiker_clean}</b> bo'yicha ma'lumot topilmadi. Tiker to'g'ri yozilganini tekshiring.", None
 
-        narx = info.get('currentPrice') or info.get('regularMarketPrice', 0)
+        narx = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose', 0)
         valyuta = info.get('currency', 'USD')
-        long_name = info.get('longName', tiker)
+        long_name = info.get('longName') or info.get('shortName') or tiker_clean
 
+        # Narx o'zgarishlari
         closes = hist_1y['Close']
         change_1d = round(((closes.iloc[-1] - closes.iloc[-2]) / closes.iloc[-2]) * 100, 2) if len(closes) > 1 else 0
         change_1w = round(((closes.iloc[-1] - closes.iloc[-6]) / closes.iloc[-6]) * 100, 2) if len(closes) >= 6 else 0
         change_1m = round(((closes.iloc[-1] - closes.iloc[0]) / closes.iloc[0]) * 100, 2) if len(closes) > 1 else 0
 
+        # Indikatorlar
         rsi, rsi_signal = hisobla_rsi(closes)
 
+        # Xavfsiz formatlash funksiyasi (Hech qachon kodni quritmaydi)
+        def safe_float(val, fmt="{:.2f}"):
+            if val is None or isinstance(val, str):
+                return "—"
+            try:
+                return fmt.format(float(val))
+            except:
+                return "—"
+
+        # Halol status (Qarz nisbatan hisoblash)
         qarz = info.get('totalDebt', 0)
         market_cap = info.get('marketCap', 1)
         debt_ratio = (qarz / market_cap) * 100 if market_cap else 0
@@ -77,7 +93,13 @@ def aksiya_tahlil(tiker: str):
         else:
             halal_status = f"🔴 HAROM ({debt_ratio:.1f}%)"
 
-        javob = f"""📊 <b>{tiker}</b> | {html.escape(long_name)}
+        # Koeffitsiyentlar
+        pe_val = safe_float(info.get('trailingPE'))
+        pb_val = safe_float(info.get('priceToBook'))
+        roe_val = safe_float(info.get('returnOnEquity', 0) * 100, "{:.1f}%")
+        div_val = safe_float(info.get('dividendYield', 0) * 100, "{:.2f}%")
+
+        javob = f"""📊 <b>{tiker_clean}</b> | {html.escape(long_name)}
 Sektor: {html.escape(info.get('sector', 'Noma\'lum'))}
 ⚖️ Shariat: {halal_status}
 
@@ -89,20 +111,21 @@ Sektor: {html.escape(info.get('sector', 'Noma\'lum'))}
 ━━━━━━━━━━━━━━━━━━━━
 📊 Indikatorlar:
 • RSI (14): <b>{rsi}</b> → {rsi_signal}
-• P/E: {info.get('trailingPE', '—') if isinstance(info.get('trailingPE'), (int, float)) else '—'} | P/B: {info.get('priceToBook', '—') if isinstance(info.get('priceToBook'), (int, float)) else '—'}
-• ROE: {info.get('returnOnEquity', 0)*100:.1f}% | Div: {info.get('dividendYield', 0)*100:.2f}%
+• P/E: {pe_val} | P/B: {pb_val}
+• ROE: {roe_val} | Div: {div_val}
 
 ━━━━━━━━━━━━━━━━━━━━
 🧠 Bot Bahosi: Yuqori potensial (batafsil tahlil kerak bo'lsa ayting)
 
 ━━━━━━━━━━━━━━━━━━━━
-🔗 <a href='https://www.tradingview.com/symbols/{tiker}/'>TradingView</a>"""
+🔗 <a href='https://www.tradingview.com/symbols/{tiker_clean}/'>TradingView</a>"""
         
-        return javob, tiker
+        return javob, tiker_clean
 
     except Exception as e:
         print(f"Xato {tiker}: {e}")
-        return f"❌ {tiker} tahlilida kutilmagan xatolik yuz berdi.", None
+        return f"❌ {tiker.upper()} tahlilida kutilmagan xatolik yuz berdi.", None
+
 
 # ===================== BOSH MENYU =====================
 def main_menu():
@@ -148,5 +171,5 @@ def handle_messages(message):
         bot.reply_to(message, javob, parse_mode="HTML", disable_web_page_preview=True)
 
 if __name__ == "__main__":
-    print("🚀 PRO Aksiyalar Boti yangi token bilan muvaffaqiyatli ishga tushdi!")
+    print("🚀 PRO Aksiyalar Boti yangilandi va ishga tushdi!")
     bot.infinity_polling(none_stop=True, interval=0)
