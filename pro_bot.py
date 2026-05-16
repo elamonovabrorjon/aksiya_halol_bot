@@ -1,3 +1,4 @@
+
 import telebot
 from telebot import types
 import yfinance as yf
@@ -40,7 +41,7 @@ def hisobla_rsi(closes, period=14):
     except:
         return "—", "HOLD ↕️"
 
-# ===================== SIZGA YOQQAN META FORMATI =====================
+# ===================== SIZGA YOQQAN IXCHAM META FORMATI =====================
 def aksiya_tahlil(tiker: str):
     try:
         tiker_clean = tiker.strip().upper()
@@ -108,7 +109,7 @@ Sektor: {html.escape(info.get('sector', 'Noma\'lum'))}
     except Exception as e:
         return f"❌ {tiker.upper()} tahlilida kutilmagan xatolik yuz berdi.", None
 
-# ===================== TO'LIQLIGICHA QAYTARILGAN ASOSIY MENYU =====================
+# ===================== TO'LIQLIGICHA BARCHA ASOSIY MENYULAR =====================
 def main_menu():
     kb = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     kb.add(
@@ -176,5 +177,7 @@ def callback_handler(call):
     bot.send_message(call.message.chat.id, javob, parse_mode="HTML", disable_web_page_preview=True)
     bot.answer_callback_query(call.id)
 
+# ===================== SIZ SO'RAGAN TOZALASH FUNKSIYASI =====================
 if __name__ == "__main__":
-    bot.infinity_polling(none_stop=True, interval=0)
+    # skip_pending=True fondagi eski soxta jarayonlarni avtomatik uzib yuboradi
+    bot.polling(none_stop=True, skip_pending=True)
