@@ -149,7 +149,7 @@ def get_crypto_market_summary():
     matn += "━━━━━━━━━━━━━━━━━━━━"
     return matn
 
-# ===================== BUGUNGI ENGL KUCHLI O'SGAN VA TUSHGAN AKSIYALAR =====================
+# ===================== BUGUNGI ENG KUCHLI O'SGAN VA TUSHGAN AKSIYALAR =====================
 def get_market_movers():
     watch_list = ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "GOOGL", "META", "AMD", "NFLX", "INTC", "TSCO", "BABA", "XOM", "JPM", "NIO"]
     gainers = []
@@ -200,8 +200,8 @@ def hisobla_rsi(closes, period=14):
         loss = -delta.clip(upper=0)
         avg_gain = gain.ewm(com=period-1, adjust=False).mean()
         avg_loss = loss.ewm(com=period-1, adjust=False).mean()
-        rs = avg_gain / avg_loss.where(avg_loss != 0, 1)
-        rsi = 100 - (100 / (1 + rs))
+        text_rs = avg_gain / avg_loss.where(avg_loss != 0, 1)
+        rsi = 100 - (100 / (1 + text_rs))
         current_rsi = round(rsi.iloc[-1], 2)
         
         if current_rsi >= 70: return current_rsi, "SELL 📉"
@@ -257,10 +257,8 @@ def aksiya_tahlil(tiker: str):
         
         div_yield = info.get('dividendYield')
         div_str = f"{round(div_yield * 100, 2)}%" if div_yield else "0.0%"
-        ishchilar = info.get('fullTimeEmployees') or 0
-        ishchilar_str = f"{ishchilar:,} ta" if ishchilar > 0 else "—"
 
-        # 📊 YANGI KO'RSATKICHLAR (SHARES, FLOAT VA VOLUME)
+        # Aksiyalar miqdori, float va hajm ma'lumotlari
         jami_aksiya = info.get('sharesOutstanding', 0)
         sotuvdagi_aksiya = info.get('floatShares', 0)
         kunlik_hajm = info.get('volume', 0)
@@ -290,12 +288,8 @@ def aksiya_tahlil(tiker: str):
 
         pe_str = f"{round(info.get('trailingPE'), 2)}" if info.get('trailingPE') else "—"
         pb_str = f"{round(info.get('priceToBook'), 2)}" if info.get('priceToBook') else "—"
-        roe_str = f"{round(info.get('returnOnEquity') * 100, 2)}%" if info.get('returnOnEquity') else "—"
         eps_str = f"{round(info.get('trailingEps'), 2)}" if info.get('trailingEps') else "—"
         fcf_str = format_katta_son(info.get('freeCashflow'))
-
-        sof_foyda = info.get('netIncomeToCommon') or info.get('netIncome', 0)
-        foyda_status = "FOYDADA 💹" if sof_foyda > 0 else "ZIYONDA 🚨"
 
         target_price = info.get('targetMeanPrice', narx)
         upside = round(((target_price - narx) / narx) * 100, 2) if narx else 0.0
@@ -336,7 +330,7 @@ Narx: <b>{narx:,.2f} USD</b>
 52W M/M: <b>{high_52:,.2f} / {low_52:,.2f}</b>
 Cap: <b>{cap_str}</b> | Div Yield: <b>{div_str}</b>
 ━━━━━━━━━━━━━━━━━━━━
-📦 <b>Aksiyalar miqdori & Muomala (Yangi):</b>
+📦 <b>Aksiyalar miqdori & Muomala:</b>
   └ 📊 Jami chiqarilgan: <b>{jami_aksiya_str}</b>
   └ 🛒 Sotuvda (Float): <b>{sotuvdagi_aksiya_str}</b>
   └ 🔄 Bugungi Oldi-sotdi: <b>{kunlik_hajm_str}</b>
