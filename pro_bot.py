@@ -60,7 +60,7 @@ def get_users_count():
 def get_stock_data(ticker: str):
     try:
         stock = yf.Ticker(ticker)
-        return stock, stock.info, stock.history(period="1y")
+        return stock, stock.info, stock.history(period="max") # IPO sanasini aniqlash uchun period "max" qilindi
     except:
         return None, None, None
 
@@ -258,14 +258,22 @@ def aksiya_tahlil(tiker: str):
         sector = info.get('sector', 'Kripto / Moliyaviy Aktiv')
         narx = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose', 0)
         
-        # LOGOTIP TIZIMI: Agar clearbit ishlamasa, zaxira manba ulanadi
         logo_url = f"https://images.financialmodelingprep.com/image/company_logos/{tiker_clean}.png"
         
         desc_en = info.get('longBusinessSummary', '')
         summary_uz = "— Ma'lumot yo'q —"
         if desc_en:
-            prompt_desc = f"Quyidagi kompaniya haqidagi ma'lumotni o'zbek tiliga professional va 2 ta lo'nda gapda tarjima qilib ber:\n\n{desc_en[:500]}"
+            prompt_desc = f"Quyidagi kompaniya haqidagi ma'lumotni o'zbek tiliga professional va 2 ta lo'nda gapda tarjima qilib ver:\n\n{desc_en[:500]}"
             summary_uz = ai_request(prompt_desc) or "— Tarjima yuklanmadi —"
+
+        # ===================== IPO SANASI VA TASHKIL ETILGAN YILI (Yangi qo'shilgan qism) =====================
+        founded_year = info.get('auditRisk', '—') # Ba'zi API'larda joylashuviga ko'ra o'zgaradi, yfinance'da to'g'ridan-to'g'ri founded yo'q bo'lsa info'dan qidiramiz
+        # Muqobil tahlil:
+        try:
+            ipo_date_raw = hist.index[0]
+            ipo_sana_str = ipo_date_raw.strftime('%d.%m.%Y')
+        except:
+            ipo_sana_str = "—"
 
         high_52 = info.get('fiftyTwoWeekHigh', narx)
         low_52 = info.get('fiftyTwoWeekLow', narx)
@@ -275,9 +283,16 @@ def aksiya_tahlil(tiker: str):
         div_yield = info.get('dividendYield')
         div_str = f"{round(div_yield * 100, 2)}%" if div_yield else "0.0%"
 
-        # Ishchilar soni va Egalik tarkibi
         xodimlar_soni = info.get('fullTimeEmployees', 0)
         xodimlar_str = f"{xodimlar_soni:,} nafar" if xodimlar_soni else "—"
+
+        naqd_pul = info.get('totalCash', 0)
+        qarz = info.get('totalDebt', 0)
+        sof_foyda = info.get('netIncomeToCommon', 0) or info.get('netIncome', 0)
+
+        naqd_pul_str = format_katta_son(naqd_pul) + " USD" if naqd_pul else "—"
+        qarz_str = format_katta_son(qarz) + " USD" if qarz else "—"
+        sof_foyda_str = format_katta_son(sof_foyda) + " USD" if sof_foyda else "—"
 
         inst_percent = info.get('heldPercentInstitutions', 0) * 100
         insider_percent = info.get('heldPercentInsiders', 0) * 100
@@ -289,7 +304,38 @@ def aksiya_tahlil(tiker: str):
         retail_percent = 100.0 - (inst_percent + insider_percent)
         if retail_percent < 0: retail_percent = 0.0
 
-        # Muomala ma'lumotlari
+        # ===================== DINAMIK KITLAR ANALIZI =====================
+        kitlar_matni = ""
+        if "-USD" not in tiker_clean:
+            try:
+                inst_holders = stock.institutional_holders
+                if inst_holders is not None and not inst_holders.empty:
+                    mashhur_kitlar = {
+                        "Vanguard Group": "🐳 Vanguard Group",
+                        "BlackRock": "🐳 BlackRock Inc.",
+                        "Berkshire Hathaway": "👑 Berkshire Hathaway (Buffett)",
+                        "State Street": "🐳 State Street Corp",
+                        "Citadel": "⚔️ Citadel Advisors LLC"
+                    }
+                    tutilgan_kitlar = []
+                    for idx, row in inst_holders.iterrows():
+                        holder_name = str(row.get('Holder', ''))
+                        for k_key, k_label in mashhur_kitlar.items():
+                            if k_key.lower() in holder_name.lower():
+                                shares = row.get('Shares', 0)
+                                pct = row.get('% Out', 0)
+                                if pct and pct < 1.0: pct = pct * 100
+                                tutilgan_kitlar.append(f"  └ {k_label}: <b>{format_katta_son(shares)} dona</b> (<b>{pct:.2f}%</b>)")
+                                break
+                    if tutilgan_kitlar:
+                        kitlar_matni = "━━━━━━━━━━━━━━━━━━━━\n🐋 <b>YIRIK KITLARNING ULUSHI (Top Fondlar):</b>\n" + "\n".join(tutilgan_kitlar) + "\n"
+                    else:
+                        kitlar_matni = "━━━━━━━━━━━━━━━━━━━━\n🐋 <b>YIRIK KITLARNING ULUSHI (Top Fondlar):</b>\n  └ Top-5 yirik fond ro'yxatda topilmadi.\n"
+                else:
+                    kitlar_matni = "━━━━━━━━━━━━━━━━━━━━\n🐋 <b>YIRIK KITLARNING ULUSHI (Top Fondlar):</b>\n  └ Ma'lumot vaqtincha yuklanmadi.\n"
+            except:
+                kitlar_matni = "━━━━━━━━━━━━━━━━━━━━\n🐋 <b>YIRIK KITLARNING ULUSHI (Top Fondlar):</b>\n  └ Ma'lumot topilmadi.\n"
+
         jami_aksiya = info.get('sharesOutstanding', 0)
         sotuvdagi_aksiya = info.get('floatShares', 0)
         kunlik_hajm = info.get('volume', 0)
@@ -312,7 +358,6 @@ def aksiya_tahlil(tiker: str):
             kelgusi_div_str = f"{round(kelgusi_div_narx / 4, 2)} USD" if (kelgusi_div_narx and kelgusi_div_narx != '—' and div_yield) else f"{kelgusi_div_narx} USD"
             kelgusi_div_sana = format_sana(kelgusi_div_sana_raw)
 
-        qarz = info.get('totalDebt', 0)
         debt_ratio = (qarz / market_cap) * 100 if market_cap else 0
         halal_status = "HALOL 🟢" if debt_ratio < 30 else ("SHUBHALI 🟡" if debt_ratio <= 40 else "HAROM 🔴")
         if "-USD" in tiker_clean: halal_status = "KRIPTO 🪙"
@@ -324,7 +369,7 @@ def aksiya_tahlil(tiker: str):
 
         target_price = info.get('targetMeanPrice', narx)
         upside = round(((target_price - narx) / narx) * 100, 2) if narx else 0.0
-        dcf_status = f"Undervalued 🟢 ({upside:+.2f}%)" if upside > 10 else (f"Overvalued 🔴 ({upside:+.2f}%)" if upside < -10 else f"Fair Value 🟡 ({upside:+.2f}%)")
+        dcf_status = f"Arzon (Undervalued) 🟢 ({upside:+.2f}%)" if upside > 10 else (f"Qimmat (Overvalued) 🔴 ({upside:+.2f}%)" if upside < -10 else f"Adolatli (Fair Value) 🟡 ({upside:+.2f}%)")
 
         closes = hist['Close']
         total_days = len(closes)
@@ -338,7 +383,7 @@ def aksiya_tahlil(tiker: str):
             return float('nan')
 
         ch_1d, ch_1w, ch_1m, ch_3m, ch_6m = get_change(-2), get_change(-6), get_change(-22), get_change(-64), get_change(-127)
-        ch_1y = ((closes.iloc[-1] - closes.iloc[0]) / closes.iloc[0]) * 100 if total_days > 0 else float('nan')
+        ch_1y = ((closes.iloc[-1] - closes.iloc[-252]) / closes.iloc[-252]) * 100 if total_days > 252 else float('nan')
 
         try:
             hist_3m = closes.iloc[-64:] if total_days >= 64 else closes
@@ -361,14 +406,22 @@ Sektor: <b>{html.escape(sector)}</b> | Status: <b>{halal_status}</b>
 ━━━━━━━━━━━━━━━━━━━━
 ℹ️ <b>Kompaniya haqida:</b>
 <i>{summary_uz}</i>
+
+📅 <b>IPO Sanasi:</b> <b>{ipo_sana_str}</b>
 ━━━━━━━━━━━━━━━━━━━━
-Narx: <b>{narx:,.2f} USD</b>
+💵 Narx: <b>{narx:,.2f} USD</b>
+⚖️ <b>DCF Adolatli Qiymati:</b> <b>{dcf_status}</b>
 52W M/M: <b>{high_52:,.2f} / {low_52:,.2f}</b>
 Cap: <b>{cap_str}</b> | Div Yield: <b>{div_str}</b>
 ━━━━━━━━━━━━━━━━━━━━
 🏢 <b>Kompaniya xodimlari:</b> <b>{xodimlar_str}</b>
 ━━━━━━━━━━━━━━━━━━━━
-🐋 <b>Egalik tarkibi (Bozor kuchlari):</b>
+👑 <b>Moliyaviy Balans (G'azna):</b>
+  └ 💵 Qo'lidagi naqd pul: <b>{naqd_pul_str}</b>
+  └ 🚨 Jami qarzi: <b>{qarz_str}</b>
+  └ 📈 Sof foyda (Yillik): <b>{sof_foyda_str}</b>
+{kitlar_matni}━━━━━━━━━━━━━━━━━━━━
+🐋 <b>Egalik tarkibi (Umumiy):</b>
   └ 🐳 Kitlar (Yirik Fondlar): <b>{inst_percent:.1f}%</b>
   └ 👔 Egalari (Insayderlar): <b>{insider_percent:.1f}%</b>
   └ 🛒 Chakana treyderlar (Aktiv xalq): <b>{retail_percent:.1f}%</b>
@@ -385,7 +438,7 @@ Cap: <b>{cap_str}</b> | Div Yield: <b>{div_str}</b>
 ━━━━━━━━━━━━━━━━━━━━
 <b>Fundamental Ko'rsatkichlar:</b>
 P/E: <b>{pe_str}</b> | P/B: <b>{pb_str}</b> | EPS: <b>{eps_str}</b>
-FCF: <b>{fcf_str}</b> | DCF Qiymati: <b>{dcf_status}</b>
+FCF: <b>{fcf_str}</b>
 ━━━━━━━━━━━━━━━━━━━━
 <b>Fibonacci (3M):</b>
   38.2%: <b>{fib_38:,.2f} USD</b> | 50.0%: <b>{fib_50:,.2f} USD</b> | 61.8%: <b>{fib_61:,.2f} USD</b>
@@ -435,7 +488,7 @@ def main_menu():
         types.KeyboardButton("🇺🇸 S&P 500 indeks"), types.KeyboardButton("🤖 AI Tavsiyalari"),
         types.KeyboardButton("🇺🇿 O'zbekiston aksiyalari"), types.KeyboardButton("📰 Fond bozori yangiliklari"),
         types.KeyboardButton("🪙 Kripto bozori"), types.KeyboardButton("🔥 Bozor yetakchilari"),
-        types.KeyboardButton("📖 Atamalar lug'ati")
+        types.KeyboardButton("🐋 Kitlar kuzatuvida"), types.KeyboardButton("📖 Atamalar lug'ati")
     )
     return kb
 
@@ -494,7 +547,6 @@ def handle_messages(message):
         bot.send_message(user_id, res if res else "🤖 AI xizmati band. Keyinroq urinib ko'ring.", parse_mode="HTML", reply_markup=ai_exit_menu())
         return
 
-    # Asosiy tugmalar filtri
     if text == "🔍 RSI Skriner":
         bot.send_message(user_id, "🔍 <b>RSI Skriner (Eng faol kompaniyalar):</b>", parse_mode="HTML", reply_markup=inline_aksiyalar(["NVDA", "AAPL", "MSFT", "TSLA", "AMD", "AMZN"]))
         
@@ -512,9 +564,22 @@ def handle_messages(message):
                 else:
                     bot.send_message(user_id, javob, parse_mode="HTML", reply_markup=inline_action(tiker_clean, ai_str))
             time.sleep(1)
+
+    elif text == "🐋 Kitlar kuzatuvida":
+        bot.send_chat_action(user_id, 'typing')
+        prompt_whales = (
+            "Siz professional moliya va fond bozori expertisiz. Dunyoning eng yirik xedj-fondlari va 'Kitlar'i "
+            "(Vanguard, BlackRock, Berkshire Hathaway (Warren Buffett), Citadel) hozirgi chorakda AQSh fond bozorida "
+            "asosan qaysi sohalarni (AI, Yarimo'tkazgichlar, Energetika va h.k.) va qaysi top kompaniyalarni "
+            "faol kuzatib yoki sotib olayotganligi haqida toza o'zbek tilida minimalist, juda qisqa va lo'nda tahlil bering. "
+            "Format chiroyli va qatorlar orasida joy tashlangan bo'lsin."
+        )
+        res_whales = ai_request(prompt_whales)
+        matn_whales = f"━━━━━━━━━━━━━━━━━━━━\n🐋 <b>KITLAR KUZATUVIDA (YIRIK FONDLAR)</b>\n━━━━━━━━━━━━━━━━━━━━\n{res_whales}\n━━━━━━━━━━━━━━━━━━━━"
+        bot.send_message(user_id, matn_whales, parse_mode="HTML")
             
     elif "NYSE" in text:
-        bot.send_message(user_id, "🏛️ <b>NYSE top kompaniyalari:</b>", parse_mode="HTML", reply_markup=inline_aksiyalar(["TSCO", "WMT", "KO", "XOM", "JNJ", "NKE"]))
+        bot.send_message(user_id, "🏛️ <b>NYSE top kompaniyalari:</b>", parse_mode="HTML", reply_markup=inline_aksiyalar(["TSCO", "WMT", "KO", "XOM", "JPM", "NKE"]))
     elif "NASDAQ" in text:
         bot.send_message(user_id, "💻 <b>NASDAQ top kompaniyalari:</b>", parse_mode="HTML", reply_markup=inline_aksiyalar(["AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "TSLA"]))
     elif "S&P 500" in text:
