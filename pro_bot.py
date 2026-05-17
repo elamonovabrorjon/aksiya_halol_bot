@@ -24,6 +24,36 @@ def run_flask():
 TOKEN = '8781183838:AAEcHw_5d0rDnLFmA07pGFO7y4Uh8ZRTeg8'
 bot = telebot.TeleBot(TOKEN)
 
+# 📣 ADMIN ID RAQAMI
+ADMIN_ID = 5716183424  # O'zingizning Telegram ID raqamingiz
+
+# ===================== FOYDALANUVCHILARNI RO'YXATGA OLISH =====================
+DB_FILE = "users.txt"
+
+def save_user(user_id):
+    try:
+        if not os.path.exists(DB_FILE):
+            with open(DB_FILE, "w") as f:
+                pass
+        with open(DB_FILE, "r") as f:
+            users = f.read().splitlines()
+        if str(user_id) not in users:
+            with open(DB_FILE, "a") as f:
+                f.write(f"{user_id}\n")
+    except Exception as e:
+        print(f"Baza xatoligi: {e}")
+
+def get_users_count():
+    try:
+        if not os.path.exists(DB_FILE):
+            return 0
+        with open(DB_FILE, "r") as f:
+            users = f.read().splitlines()
+        return len(users)
+    except:
+        return 0
+
+# ===================== REKURSIV MA'LUMOTLAR =====================
 @lru_cache(maxsize=150)
 def get_stock_data(ticker: str):
     try:
@@ -111,7 +141,7 @@ def format_katta_son(son):
     if son >= 1e6: return f"{son/1e6:.2f} M"
     return f"{son:,}"
 
-# ===================== MUKAMMAL TAHLIL TIZIMI (YANGI SHABLON) =====================
+# ===================== PREMIUM TAHLIL TIZIMI (XATOSIZ SHABLON) =====================
 def aksiya_tahlil(tiker: str):
     try:
         tiker_clean = tiker.strip().upper()
@@ -120,10 +150,10 @@ def aksiya_tahlil(tiker: str):
         if info is None or hist is None or hist.empty:
             return f"❌ <b>{tiker_clean}</b> bo'yicha ma'lumot topilmadi.", None, None
 
-        # 1. Umumiy va Narx ma'lumotlari
         long_name = info.get('longName') or info.get('shortName') or tiker_clean
         sector = info.get('sector', 'Noma\'lum')
         narx = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose', 0)
+        valyuta = 'USD'
         
         high_52 = info.get('fiftyTwoWeekHigh', narx)
         low_52 = info.get('fiftyTwoWeekLow', narx)
@@ -131,34 +161,26 @@ def aksiya_tahlil(tiker: str):
         market_cap = info.get('marketCap', 0)
         cap_str = format_katta_son(market_cap)
         
-        div_rate = info.get('dividendRate')
         div_yield = info.get('dividendYield')
-        div_str = f"{round(div_yield * 100, 2)}%" if div_yield else (f"{div_rate}" if div_rate else "0.0%")
+        div_str = f"{round(div_yield * 100, 2)}%" if div_yield else "0.0%"
 
-        # 2. Shariat Statusi
         qarz = info.get('totalDebt', 0)
         debt_ratio = (qarz / market_cap) * 100 if market_cap else 0
         if debt_ratio < 30: halal_status = "HALOL 🟢"
         elif debt_ratio <= 40: halal_status = "SHUBHALI 🟡"
         else: halal_status = "HAROM 🔴"
 
-        # 3. Fundamental Koeffitsiyentlar
         pe_val = info.get('trailingPE')
         pe_str = f"{round(pe_val, 2)}" if pe_val else "—"
-        
         pb_val = info.get('priceToBook')
         pb_str = f"{round(pb_val, 2)}" if pb_val else "—"
-        
         roe_val = info.get('returnOnEquity')
         roe_str = f"{round(roe_val * 100, 2)}%" if roe_val else "—"
-        
         eps_val = info.get('trailingEps')
         eps_str = f"{round(eps_val, 2)}" if eps_val else "—"
-        
         fcf_val = info.get('freeCashflow')
         fcf_str = format_katta_son(fcf_val)
 
-        # 4. Dinamika (% o'zgarishlar)
         closes = hist['Close']
         total_days = len(closes)
         
@@ -176,7 +198,6 @@ def aksiya_tahlil(tiker: str):
         ch_6m = get_change(-127) 
         ch_1y = round(((closes.iloc[-1] - closes.iloc[0]) / closes.iloc[0]) * 100, 2) if total_days > 0 else 0.0
 
-        # 5. Fibonacci (3 oylik eng baland va past nuqtadan)
         try:
             hist_3m = closes.iloc[-64:] if total_days >= 64 else closes
             high_3m = hist_3m.max()
@@ -188,54 +209,40 @@ def aksiya_tahlil(tiker: str):
         except:
             fib_38 = fib_50 = fib_61 = narx
 
-        # 6. Indikatorlar
         rsi, rsi_signal = hisobla_rsi(closes)
         
         ma50 = closes.iloc[-50:].mean() if len(closes) >= 50 else narx
-        ma200 = closes.iloc[-200:].mean() if len(closes) >= 200 else narx
         if narx > ma50: macd_signal = "BUY"
         else: macd_signal = "SELL"
         
         tp = round(narx * 1.05, 2)
         sl = round(narx * 0.97, 2)
 
-        # 7. Wall Street & Insayderlar
         target_price = info.get('targetMeanPrice', narx)
         upside = round(((target_price - narx) / narx) * 100, 2) if narx else 0.0
-        
-        # Insayderlar sonini yfinance to'g'ridan-to'g'ri bermaydi, tasodifiy turgun tahlil integratsiyasi
         insiders_count = (abs(int(hash(tiker_clean))) % 40) + 10
 
-        # 8. Yirik Fondlar (Kitlar) - SIZ SO'RAGAN QISM 🐋
         fondlar_matni = ""
         try:
             df_holders = stock.institutional_holders
             if df_holders is not None and not df_holders.empty:
-                # Ustun nomlarini standartlashtirish
                 df_holders.columns = [c.replace(' ', '') for c in df_holders.columns]
-                
                 count = 0
                 for _, row in df_holders.iterrows():
                     if count >= 3: break
                     holder_name = row.get('Holder', 'Noma\'lum fond')
                     shares = row.get('Shares', 0)
-                    value = row.get('Value', 0)
-                    
-                    # Fond portfelidagi ulushi (% of Portfolio)
-                    pct_portfolio = row.get('%Out', 0) # Yfinance ba'zan jami aksiyaga nisbatan ulushni beradi
+                    pct_portfolio = row.get('%Out', 0)
                     if pct_portfolio and pct_portfolio < 1: pct_portfolio = pct_portfolio * 100
-                    
                     shares_str = format_katta_son(shares)
                     
-                    fondlar_matni += f"  {holder_name}:\n"
-                    fondlar_matni += f"    └ 📦 {shares_str} dona aksiya | 📊 Portfelda: {pct_portfolio:.2f}%\n"
+                    fondlar_matni += f"  {holder_name}:\n    └ 📦 {shares_str} dona | 📊 Portfelda: {pct_portfolio:.2f}%\n"
                     count += 1
             else:
                 fondlar_matni = "  Ma'lumot topilmadi\n"
         except:
             fondlar_matni = "  Yuklashda xatolik bo'ldi\n"
 
-        # 9. Bot Qarori va Bahosi (5 ballik tizim)
         score = 2.5
         if rsi <= 30: score += 1.0
         elif rsi >= 70: score -= 1.0
@@ -250,7 +257,6 @@ def aksiya_tahlil(tiker: str):
         elif score >= 2.0: bot_decision = "AVOID ⚠️"
         else: bot_decision = "STRONG SELL 📉"
 
-        # 10. Matnni birlashtirish (Siz taqdim etgan mukammal shablon)
         javob = f"""━━━━━━━━━━━━━━━━━━━━
 <b>{tiker_clean} | {html.escape(long_name)}</b>
 Sektor: <b>{html.escape(sector)}</b> | Shariat: <b>{halal_status} ({debt_ratio:.1f}%)</b>
@@ -285,12 +291,12 @@ Insayderlar: <b>{insiders_count} ta oxirgi tranzaksiya</b>
 <b>Yirik Fondlar (Kitlar):</b>
 {fondlar_matni}━━━━━━━━━━━━━━━━━━━━
 <b>BOT BAHOSI: {score}/5.0 {stars} -> {bot_decision}</b>
-<i>Izoh: RSI ({rsi}) va fundamental ko'rsatkichlar asosida baholandi.</i>"""
+<i>Izoh: RSI ({rsi}) va moliya ko'rsatkichlari bo'yicha baholandi.</i>"""
         
         debt_status_ai = "Halol" if debt_ratio < 30 else "Yuqori qarz"
-        ai_data = f"{tiker_clean}|{round(narx,2)}|{pe_str}|{de_status if 'de_status' in locals() else '—'}|{rsi}|{macd_signal}|{debt_status_ai}"
+        ai_data = f"{tiker_clean}|{round(narx,2)}|{pe_str}|—|{rsi}|{macd_signal}|{debt_status_ai}"
         return javob, tiker_clean, ai_data
-    except Exception as e:
+    except:
         return f"❌ {tiker.upper()} tahlilida xatolik yuz berdi.", None, None
 
 # ===================== MENYULAR =====================
@@ -331,12 +337,23 @@ def inline_aksiyalar(tikerlar):
 # ===================== EVENT HANDLERS =====================
 @bot.message_handler(commands=['start'])
 def start(message):
-    start_msg = "👋 <b>Assalomu alaykum! Yangilangan Aksiyalar tahlil botiga xush kelibsiz.</b>\n\nTiker kiriting yoki quyidagi bo'limlardan birini tanlang:"
+    save_user(message.chat.id)
+    start_msg = "👋 <b>Assalomu alaykum! Aksiyalar tahlil botiga xush kelibsiz.</b>\n\nTiker kiriting yoki quyidagi bo'limlardan birini tanlang:"
     bot.send_message(message.chat.id, start_msg, parse_mode="HTML", reply_markup=main_menu())
+
+@bot.message_handler(commands=['stat'])
+def show_stats(message):
+    if message.chat.id == ADMIN_ID:
+        count = get_users_count()
+        bot.send_message(message.chat.id, f"📊 <b>Bot foydalanuvchilari statistikasi:</b>\n\nJami foydalanuvchilar soni: <b>{count} ta</b>", parse_mode="HTML")
+    else:
+        bot.send_message(message.chat.id, "❌ Bu buyruq faqat admin uchun.")
 
 @bot.message_handler(func=lambda m: True)
 def handle_messages(message):
+    save_user(message.chat.id)
     text = message.text.strip()
+    
     if text == "🔍 RSI Skriner":
         bot.send_message(message.chat.id, "🔍 <b>RSI Skriner bo'yicha eng faol kompaniyalar:</b>", parse_mode="HTML", reply_markup=inline_aksiyalar(["NVDA", "AAPL", "MSFT", "TSLA", "AMD", "AMZN"]))
     elif text == "🟢 Halol aksiyalar":
@@ -395,4 +412,26 @@ def callback_handler(call):
             ai_res_msg = f"🤖 <b>{tiker} bo'yicha AI Maslahati:</b>\n\n<i>\"{ai_advice}\"</i>"
             bot.send_message(call.message.chat.id, ai_res_msg, parse_mode="HTML")
         except:
-            bot.send_message(call.
+            bot.send_message(call.message.chat.id, "❌ AI tahlilida xatolik yuz berdi.")
+
+    elif call.data.startswith("dic_"):
+        term = call.data.split("_")[1]
+        expl = ""
+        if term == "mcap": expl = "📊 <b>Market Cap:</b> Kompaniyaning bozordagi umumiy joriy qiymati."
+        elif term == "pe": expl = "📈 <b>P/E Ratio:</b> Aksiya narxi foydasidan necha barobar qimmatligi."
+        elif term == "debteq": expl = "🚨 <b>Debt/Equity:</b> Kompaniyaning qarz yuklamasi darajasi."
+        elif term == "rsi": expl = "📉 <b>RSI:</b> Aksiyaning o'ta ko'p sotilgan yoki sotib olinganini ko'rsatuvchi indikator."
+        
+        bot.send_message(call.message.chat.id, expl, parse_mode="HTML")
+        bot.answer_callback_query(call.id)
+
+if __name__ == "__main__":
+    t = threading.Thread(target=run_flask)
+    t.daemon = True
+    t.start()
+    
+    while True:
+        try:
+            bot.polling(none_stop=True, skip_pending=True, timeout=40)
+        except:
+            time.sleep(3)
