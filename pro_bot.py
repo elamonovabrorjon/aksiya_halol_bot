@@ -1,4 +1,4 @@
-import telebot
+       import telebot
 from telebot import types
 import yfinance as yf
 import html
@@ -70,9 +70,9 @@ def aksiya_tahlil(tiker: str):
         if len(summary) > 180:
             summary = summary[:180] + "..."
 
-        # Yetti yangi ma'lumotlar
+        # Ishchilar soni
         employees = info.get('fullTimeEmployees')
-        employees_str = f"{employees:,}" if employees else "—"
+        employees_str = f"{employees:,} ta" if employees else "—"
         
         # Narx o'zgarishlari
         closes = hist['Close']
@@ -110,7 +110,7 @@ def aksiya_tahlil(tiker: str):
         elif debt_ratio <= 40: halal_status = "🟡 SHUBHALI"
         else: halal_status = "🔴 HAROM"
 
-        # Katta sonlarni (Market Cap, Qarz, Daromad) Trillion/Milliard formatga o'tkazish
+        # Katta sonlarni Trillion/Milliard formatga o'tkazish
         def format_katta_son(son):
             if not son or isinstance(son, str) or son == 0: return "—"
             if son >= 1e12: return f"{son/1e12:.2f} T"
@@ -157,10 +157,10 @@ def aksiya_tahlil(tiker: str):
 🏢 <b>Kompaniya profili:</b>
 • Davlat: <b>{country}</b>
 • Sektor: {html.escape(sector)}
-• Ishchilar soni: <b>{employees_str} ta</b>
+• Ishchilar soni: <b>{employees_str}</b>
 • Faoliyati: <i>{html.escape(summary)}</i>
 
-📈 <b>Yirik moliyavied ko'rsatkichlar:</b>
+📈 <b>Yirik moliyaviy ko'rsatkichlar:</b>
 • Market Cap (Kapitalizatsiya): <b>{market_cap_str} {valyuta}</b>
 • Jami daromad (Revenue): <b>{daromad_str} {valyuta}</b>
 • Jami qarz (Total Debt): <b>{qarz_str} {valyuta}</b>
@@ -216,15 +216,15 @@ def handle_messages(message):
     if text == "🔍 RSI Skriner":
         bot.reply_to(message, "🔍 <b>RSI Skriner bo'yicha top kompaniyalar:</b>", parse_mode="HTML", reply_markup=inline_aksiyalar(["NVDA", "AAPL", "MSFT", "TSLA", "AMD", "AMZN"]))
     elif text == "🟢 Halol aksiyalar":
-        bot.reply_to(message, "🟢 <b>AQSh bozoridagi halol aksiyalardan namunalar:</b>", reply_markup=inline_aksiyalar(["AAPL", "MSFT", "NVDA", "GOOGL", "META", "AMZN"]))
+        bot.reply_to(message, "🟢 <b>AQSh bozoridagi halol aksiyalardan namunalar:</b>", parse_mode="HTML", reply_markup=inline_aksiyalar(["AAPL", "MSFT", "NVDA", "GOOGL", "META", "AMZN"]))
     elif text == "🔴 Harom aksiyalar":
-        bot.reply_to(message, "🔴 <b>Shariat bo'yicha taqiqlangan aksiyalar (Banklar):</b>", reply_markup=inline_aksiyalar(["JPM", "BAC", "WFC"]))
+        bot.reply_to(message, "🔴 <b>Shariat bo'yicha taqiqlangan aksiyalar (Banklar):</b>", parse_mode="HTML", reply_markup=inline_aksiyalar(["JPM", "BAC", "WFC"]))
     elif text == "🏛️ NYSE birjasi":
-        bot.reply_to(message, "🏛️ <b>NYSE top aksiyalari:</b>", reply_markup=inline_aksiyalar(["TSCO", "BRK-B", "V", "JNJ", "WMT", "KO"]))
+        bot.reply_to(message, "🏛️ <b>NYSE top aksiyalari:</b>", parse_mode="HTML", reply_markup=inline_aksiyalar(["TSCO", "BRK-B", "V", "JNJ", "WMT", "KO"]))
     elif text == "💻 NASDAQ birjasi":
-        bot.reply_to(message, "💻 <b>NASDAQ yetakchi aksiyalari:</b>", reply_markup=inline_aksiyalar(["AAPL", "MSFT", "GOOGL", "NVDA", "TSLA", "AMD"]))
+        bot.reply_to(message, "💻 <b>NASDAQ yetakchi aksiyalari:</b>", parse_mode="HTML", reply_markup=inline_aksiyalar(["AAPL", "MSFT", "GOOGL", "NVDA", "TSLA", "AMD"]))
     elif text == "🇺🇿 O'zbekiston aksiyalari":
-        bot.reply_to(message, "🇺🇿 <b>Toshkent fond birjasi aksiyalari:</b>\nTahlil uchun tikerlarni kiriting (Masalan: URTS, KVTS).")
+        bot.reply_to(message, "🇺🇿 <b>Toshkent fond birjasi aksiyalari:</b>\nTahlil uchun tikerlarni kiriting (Masalan: URTS, KVTS).", parse_mode="HTML")
     else:
         bot.send_chat_action(message.chat.id, 'typing')
         javob, _ = aksiya_tahlil(text)
