@@ -7,6 +7,8 @@ import threading
 from flask import Flask
 import time
 import os
+import requests
+from deep_translator import GoogleTranslator
 
 # ===================== VEB-SERVER (RENDER LIVE STATUS) =====================
 app = Flask('')
@@ -32,6 +34,29 @@ def get_stock_data(ticker: str):
         return stock, info, hist
     except:
         return None, None, None
+
+# ===================== TEKIN AI INTEGRATSIYASI =====================
+def get_ai_advice(ticker, price, pe, de, rsi, trend, halal):
+    try:
+        # Sun'iy intellekt uchun qisqa va aniq kontekst yaratamiz
+        prompt = (
+            f"You are a professional stock market analyst. Give a short 2-3 sentence financial advice in Uzbek language "
+            f"for the stock {ticker}. Current Price: {price}, P/E Ratio: {pe}, Debt/Equity: {de}, RSI: {rsi}, "
+            f"Trend: {trend}, Islamic Halal Status: {halal}. Be realistic, objective, and advise whether it's safe to buy or risky now."
+        )
+        
+        # Tekin va ochiq AI API orqali so'rov yuboramiz
+        response = requests.post(
+            "https://text.pollinations.ai/",
+            json={"messages": [{"role": "user", "content": prompt}], "model": "openai"},
+            timeout=15
+        )
+        if response.status_code == 200:
+            return response.text.strip()
+        else:
+            return "🤖 AI xizmati band. Iltimos, birozdan so'ng qayta urinib ko'ring."
+    except:
+        return "🤖 AI bilan bog'lanishda xatolik yuz berdi."
 
 # ===================== TEXNIK INDIKATORLAR =====================
 def hisobla_rsi(closes, period=14):
@@ -60,20 +85,25 @@ def aksiya_tahlil(tiker: str):
         stock, info, hist = get_stock_data(tiker_clean)
         
         if info is None or hist is None or hist.empty:
-            return f"❌ <b>{tiker_clean}</b> bo'yicha ma'lumot topilmadi.", None
+            return f"❌ <b>{tiker_clean}</b> bo'yicha ma'lumot topilmadi.", None, None
 
         narx = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose', 0)
         valyuta = info.get('currency', 'USD')
         long_name = info.get('longName') or info.get('shortName') or tiker_clean
         sector = info.get('sector', 'Noma\'lum')
         country = info.get('country', 'Noma\'lum')
-        summary = info.get('longBusinessSummary', 'Kompaniya haqida ma\'lumot mavjud emas.')
-        if len(summary) > 180:
-            summary = summary[:180] + "..."
-
-        employees = info.get('fullTimeEmployees')
-        employees_str = f"{employees:,}" if employees else "—"
         
+        summary = info.get('longBusinessSummary', '')
+        if summary:
+            if len(summary) > 250:
+                summary = summary[:250] + "..."
+            try:
+                summary = GoogleTranslator(source='en', target='uz').translate(summary)
+            except:
+                pass
+        else:
+            summary = "Kompaniya haqida ma'lumot mavjud emas."
+
         closes = hist['Close']
         if len(closes) >= 22:
             change_1d = round(((closes.iloc[-1] - closes.iloc[-2]) / closes.iloc[-2]) * 100, 2)
@@ -88,13 +118,10 @@ def aksiya_tahlil(tiker: str):
         
         if narx > ma50 and ma50 > ma200:
             trend_status = "O'sish (Bullish) 📈"
-            trend_score = 1
         elif narx < ma50 and ma50 < ma200:
             trend_status = "Tushish (Bearish) 📉"
-            trend_score = -1
         else:
             trend_status = "Yassilanish (Side/Flat) ↕️"
-            trend_score = 0
 
         recommendation = info.get('recommendationKey', 'Noma\'lum').upper().replace('_', ' ')
 
@@ -107,6 +134,40 @@ def aksiya_tahlil(tiker: str):
         elif debt_ratio <= 40: halal_status = "🟡 SHUBHALI"
         else: halal_status = "🔴 HAROM"
 
+        # =============== AVTOMATIK FUNDAMENTAL BAHOLASH TIZIMI ===============
+        pe_val = info.get('trailingPE')
+        if pe_val is not None:
+            pe_val = float(pe_val)
+            if pe_val <= 0: pe_status = f"{pe_val:.2f} (Zararda 🚨)"
+            elif pe_val <= 25: pe_status = f"{pe_val:.2f} (Arzon/Yaxshi ✅)"
+            elif pe_val <= 40: pe_status = f"{pe_val:.2f} (Me'yorda 🟡)"
+            else: pe_status = f"{pe_val:.2f} (Qimmat 🚨)"
+        else: pe_status = "—"
+
+        roe_val = info.get('returnOnEquity')
+        if roe_val is not None:
+            roe_pct = float(roe_val) * 100
+            if roe_pct >= 15: roe_status = f"{roe_pct:.2f}% (Yuqori/A'lo ✅)"
+            elif roe_pct >= 5: roe_status = f"{roe_pct:.2f}% (O'rtacha 🟡)"
+            else: roe_status = f"{roe_pct:.2f}% (Past/Yomon 🚨)"
+        else: roe_status = "—"
+
+        debt_eq_val = info.get('debtToEquity')
+        if debt_eq_val is not None:
+            de_val = float(debt_eq_val)
+            if de_val <= 50 or de_val <= 0.5: de_status = f"{de_val} (Qarzi kam ✅)"
+            else: de_status = f"{de_val} (Ko'p qarz 🚨)"
+        else: de_status = "—"
+
+        current_ratio_val = info.get('currentRatio')
+        cr_status = f"{current_ratio_val:.2f}" if current_ratio_val else "—"
+
+        kitlar_ulushi = "—"
+        try:
+            held_pct = info.get('sharesPercentSharesOut') or info.get('heldPercentInstitutions')
+            if held_pct: kitlar_ulushi = f"{round(float(held_pct) * 100, 2)}%"
+        except: pass
+
         def format_katta_son(son):
             if not son or isinstance(son, str) or son == 0: return "—"
             if son >= 1e12: return f"{son/1e12:.2f} T"
@@ -118,71 +179,46 @@ def aksiya_tahlil(tiker: str):
         qarz_str = format_katta_son(qarz)
         daromad_str = format_katta_son(daromad)
 
-        buy_points = 0
-        if trend_score == 1: buy_points += 1
-        if rsi_signal == "BUY 📈": buy_points += 1
-        if "BUY" in recommendation: buy_points += 1
-        
-        sell_points = 0
-        if trend_score == -1: sell_points += 1
-        if rsi_signal == "SELL 📉": sell_points += 1
-        if "SELL" in recommendation: sell_points += 1
-
-        if halal_status == "🔴 HAROM":
-            final_decision = "🔴 SAVDO TAQIQLANADI (Shariatga zid)"
-        elif buy_points >= 2:
-            final_decision = "🟢 KUCHLI XARID (STRONG BUY) 📈"
-        elif sell_points >= 2:
-            final_decision = "🚨 KUCHLI SOTISH (STRONG SELL) 📉"
-        elif buy_points == 1 and sell_points == 0:
-            final_decision = "🟢 XARID REJIMIDA (BUY) 👍"
-        else:
-            final_decision = "🟡 KUTISH POZITSIYASI (HOLD) ↕️"
-
-        def safe_num(val, mode=None):
-            if val is None or isinstance(val, str) or val == 0: return "—"
-            if mode == "percent": return f"{round(float(val) * 100, 2)}%"
-            return f"{round(float(val), 2)}"
-
-        high_52 = safe_num(info.get('fiftyTwoWeekHigh'))
-        low_52 = safe_num(info.get('fiftyTwoWeekLow'))
+        high_52 = round(info.get('fiftyTwoWeekHigh', 0), 2) if info.get('fiftyTwoWeekHigh') else "—"
+        low_52 = round(info.get('fiftyTwoWeekLow', 0), 2) if info.get('fiftyTwoWeekLow') else "—"
 
         javob = f"""📊 <b>{tiker_clean} | {html.escape(long_name)}</b>
 
 🏢 <b>Kompaniya profili:</b>
-• Davlat: <b>{country}</b>
-• Sektor: {html.escape(sector)}
-• Ishchilar soni: <b>{employees_str} ta</b>
+• Davlat: <b>{country}</b> | Sektor: {html.escape(sector)}
 • Faoliyati: <i>{html.escape(summary)}</i>
 
 📈 <b>Yirik moliyaviy ko'rsatkichlar:</b>
-• Market Cap (Kapitalizatsiya): <b>{market_cap_str} {valyuta}</b>
+• Market Cap: <b>{market_cap_str} {valyuta}</b>
 • Jami daromad (Revenue): <b>{daromad_str} {valyuta}</b>
-• Jami qarz (Total Debt): <b>{qarz_str} {valyuta}</b>
 • Shariat statusi: <b>{halal_status} ({debt_ratio:.1f}%)</b>
+• Kitlar (Whales) ulushi: <b>{kitlar_ulushi}</b>
+
+⚖️ <b>Fundamental Baholash (Avtomatik):</b>
+• <b>P/E Ratio:</b> {pe_status}
+• <b>ROE:</b> {roe_status}
+• <b>Debt/Equity (Qarz):</b> {de_status}
+• <b>Current Ratio (Likvidlik):</b> {cr_status}
 
 ━━━━━━━━━━━━━━━━━━━━
-💰 <b>Bozor narxi: {safe_num(narx)} {valyuta}</b> ({change_1d:+.2f}%)
+💰 <b>Bozor narxi: {round(narx, 2)} {valyuta}</b> ({change_1d:+.2f}%)
 📈 1K: {change_1d:+.2f}% | 1H: {change_1w:+.2f}% | 1O: {change_1m:+.2f}%
 📅 52H diapazon: {high_52} / {low_52}
 
 ━━━━━━━━━━━━━━━━━━━━
-📊 <b>Texnik tahlil va Koeffitsiyentlar:</b>
+📊 <b>Texnik tahlil:</b>
 • RSI (14): <b>{rsi}</b> → {rsi_signal}
 • Trend (MA): <b>{trend_status}</b>
 • Wall Street tavsiyasi: <b>{recommendation}</b>
-• P/E: {safe_num(info.get('trailingPE'))} | ROE: {safe_num(info.get('returnOnEquity'), 'percent')}
-
-━━━━━━━━━━━━━━━━━━━━
-🧠 <b>YAKUNIY BOT QARORI:</b>
-<b>{final_decision}</b>
 
 ━━━━━━━━━━━━━━━━━━━━
 🔗 <a href='https://www.tradingview.com/symbols/{tiker_clean}/'>TradingView tahlili</a>"""
         
-        return javob, tiker_clean
+        # AI ma'lumotlarini keyinchalik ishlatish uchun qisqa lug'at qilib qaytaramiz
+        ai_data = f"{tiker_clean}|{round(narx,2)}|{pe_status}|{de_status}|{rsi}|{trend_status}|{halal_status}"
+        return javob, tiker_clean, ai_data
     except Exception as e:
-        return f"❌ {tiker.upper()} tahlilida xatolik yuz berdi.", None
+        return f"❌ {tiker.upper()} tahlilida xatolik yuz berdi.", None, None
 
 # ===================== KLAVIATURALAR =====================
 def main_menu():
@@ -190,7 +226,29 @@ def main_menu():
     kb.add(
         types.KeyboardButton("🟢 Halol aksiyalar"), types.KeyboardButton("🔍 RSI Skriner"),
         types.KeyboardButton("🏛️ NYSE birjasi"), types.KeyboardButton("💻 NASDAQ birjasi"),
-        types.KeyboardButton("🇺🇿 O'zbekiston aksiyalari"), types.KeyboardButton("❓ Yordam")
+        types.KeyboardButton("🎯 Kun aksiyasi"), types.KeyboardButton("📖 Atamalar lug'ati"),
+        types.KeyboardButton("❓ Yordam")
+    )
+    return kb
+
+def inline_dictionary():
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        types.InlineKeyboardButton("📊 Market Cap", callback_data="dic_mcap"),
+        types.InlineKeyboardButton("📈 P/E Ratio", callback_data="dic_pe"),
+        types.InlineKeyboardButton("💰 ROE nima?", callback_data="dic_roe"),
+        types.InlineKeyboardButton("🚨 Debt/Equity", callback_data="dic_debteq"),
+        types.InlineKeyboardButton("📉 RSI Indikatori", callback_data="dic_rsi"),
+        types.InlineKeyboardButton("🐋 Kitlar kimlar?", callback_data="dic_whales")
+    )
+    return kb
+
+def inline_action(tiker, ai_string):
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    # AI tugmasi bosilganda barcha koeffitsiyentlarni callback_data orqali uzatamiz
+    kb.add(
+        types.InlineKeyboardButton("🤖 AI Maslahati", callback_data=f"ai_{ai_string}"),
+        types.InlineKeyboardButton("📈 TradingView", url=f"https://www.tradingview.com/symbols/{tiker}/")
     )
     return kb
 
@@ -216,22 +274,56 @@ def handle_messages(message):
         bot.reply_to(message, "🏛️ <b>NYSE top aksiyalari:</b>", parse_mode="HTML", reply_markup=inline_aksiyalar(["TSCO", "BRK-B", "V", "JNJ", "WMT", "KO"]))
     elif text == "💻 NASDAQ birjasi":
         bot.reply_to(message, "💻 <b>NASDAQ yetakchi aksiyalari:</b>", parse_mode="HTML", reply_markup=inline_aksiyalar(["AAPL", "MSFT", "GOOGL", "NVDA", "TSLA", "AMD"]))
-    elif text == "🇺🇿 O'zbekiston aksiyalari":
-        bot.reply_to(message, "🇺🇿 <b>Toshkent fond birjasi aksiyalari:</b>\nTahlil uchun tikerlarni kiriting (Masalan: URTS, KVTS).", parse_mode="HTML")
+    elif text == "🎯 Kun aksiyasi":
+        bot.send_chat_action(message.chat.id, 'typing')
+        javob, tiker, ai_str = aksiya_tahlil("MSFT")
+        bot.reply_to(message, f"🎯 <b>Bugungi kun aksiyasi tavsiyasi:</b>\n\n{javob}", parse_mode="HTML", reply_markup=inline_action(tiker, ai_str) if tiker else None, disable_web_page_preview=True)
+    elif text == "📖 Atamalar lug'ati":
+        bot.reply_to(message, "📖 <b>Moliyaviy tahlil lug'ati bo'limi.</b>", parse_mode="HTML", reply_markup=inline_dictionary())
     elif text == "❓ Yordam":
-        bot.reply_to(message, "❓ <b>Botdan foydalanish:</b>\nTahlil qilmoqchi bo'lgan aksiyangiz tikerini inglizcha qisqartmasini yozib yuboring.\nMasalan: <code>AAPL</code>, <code>NVDA</code>, <code>TSCO</code>", parse_mode="HTML")
+        bot.reply_to(message, "❓ Tahlil qilmoqchi bo'lgan aksiyangiz tikerini inglizcha kiriting. Masalan: <code>AAPL</code>", parse_mode="HTML")
     else:
         bot.send_chat_action(message.chat.id, 'typing')
-        javob, _ = aksiya_tahlil(text)
-        bot.reply_to(message, javob, parse_mode="HTML", disable_web_page_preview=True)
+        javob, tiker, ai_str = aksiya_tahlil(text)
+        if tiker:
+            bot.reply_to(message, javob, parse_mode="HTML", reply_markup=inline_action(tiker, ai_str), disable_web_page_preview=True)
+        else:
+            bot.reply_to(message, javob, parse_mode="HTML")
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("anz_"))
+@bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
-    ticker = call.data.split("_")[1]
-    bot.send_chat_action(call.message.chat.id, 'typing')
-    javob, _ = aksiya_tahlil(ticker)
-    bot.send_message(call.message.chat.id, javob, parse_mode="HTML", disable_web_page_preview=True)
-    bot.answer_callback_query(call.id)
+    if call.data.startswith("anz_"):
+        ticker = call.data.split("_")[1]
+        bot.send_chat_action(call.message.chat.id, 'typing')
+        javob, tiker_clean, ai_str = aksiya_tahlil(ticker)
+        bot.send_message(call.message.chat.id, javob, parse_mode="HTML", reply_markup=inline_action(tiker_clean, ai_str) if tiker_clean else None, disable_web_page_preview=True)
+    
+    elif call.data.startswith("ai_"):
+        # Callback ma'lumotlarini qismlarga ajratib olamiz
+        try:
+            _, tiker, price, pe, de, rsi, trend, halal = call.data.split("|")
+            bot.answer_callback_query(call.id, text="🤖 Sun'iy intellekt tahlil qilmoqda...")
+            bot.send_chat_action(call.message.chat.id, 'typing')
+            
+            # AI maslahatini olish
+            ai_advice = get_ai_advice(tiker, price, pe, de, rsi, trend, halal)
+            
+            bot.send_message(call.message.chat.id, f"🤖 <b>{tiker} bo'yicha Sun'iy Intellekt Maslahati:</b>\n\n<i>\"{ai_advice}\"</i>", parse_mode="HTML")
+        except:
+            bot.send_message(call.message.chat.id, "❌ AI tahlilini yuklashda xatolik yuz berdi.")
+            
+    elif call.data.startswith("dic_"):
+        term = call.data.split("_")[1]
+        expl = ""
+        if term == "mcap": expl = "📊 <b>Market Cap:</b> Kompaniyaning bozordagi umumiy joriy qiymati."
+        elif term == "pe": expl = "📈 <b>P/E Ratio:</b> Aksiya narxi uning foydasidan necha barobar qimmatligi. 15-25 orasi yaxshi."
+        elif term == "roe": expl = "💰 <b>ROE:</b> Kompaniya o'z investorlarining pulidan qanchalik samarali foyda ko'rayotgani."
+        elif term == "debteq": expl = "🚨 <b>Debt/Equity:</b> Qarz yuklamasi. 0.50 dan past bo'lsa xavfsiz va yaxshi."
+        elif term == "rsi": expl = "📉 <b>RSI:</b> Aksiyaning arzon (30 dan past) yoki qimmatligini (70 dan baland) ko'rsatadi."
+        elif term == "whales": expl = "🐋 <b>Kitlar:</b> Bozordagi trillionlab dollarlarni boshqaradigan yirik banklar va investitsiya fondlari."
+        
+        bot.send_message(call.message.chat.id, expl, parse_mode="HTML")
+        bot.answer_callback_query(call.id)
 
 if __name__ == "__main__":
     t = threading.Thread(target=run_flask)
