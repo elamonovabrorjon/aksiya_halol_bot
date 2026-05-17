@@ -1,4 +1,4 @@
-       import telebot
+      import telebot
 from telebot import types
 import yfinance as yf
 import html
@@ -72,7 +72,7 @@ def aksiya_tahlil(tiker: str):
 
         # Ishchilar soni
         employees = info.get('fullTimeEmployees')
-        employees_str = f"{employees:,} ta" if employees else "—"
+        employees_str = f"{employees:,}" if employees else "—"
         
         # Narx o'zgarishlari
         closes = hist['Close']
@@ -110,141 +110,4 @@ def aksiya_tahlil(tiker: str):
         elif debt_ratio <= 40: halal_status = "🟡 SHUBHALI"
         else: halal_status = "🔴 HAROM"
 
-        # Katta sonlarni Trillion/Milliard formatga o'tkazish
-        def format_katta_son(son):
-            if not son or isinstance(son, str) or son == 0: return "—"
-            if son >= 1e12: return f"{son/1e12:.2f} T"
-            if son >= 1e9: return f"{son/1e9:.2f} B"
-            if son >= 1e6: return f"{son/1e6:.2f} M"
-            return f"{son:,}"
-
-        market_cap_str = format_katta_son(market_cap)
-        qarz_str = format_katta_son(qarz)
-        daromad_str = format_katta_son(daromad)
-
-        # Smart Baholash Algoritmi
-        buy_points = 0
-        if trend_score == 1: buy_points += 1
-        if rsi_signal == "BUY 📈": buy_points += 1
-        if "BUY" in recommendation: buy_points += 1
-        
-        sell_points = 0
-        if trend_score == -1: sell_points += 1
-        if rsi_signal == "SELL 📉": sell_points += 1
-        if "SELL" in recommendation: sell_points += 1
-
-        if halal_status == "🔴 HAROM":
-            final_decision = "🔴 SAVDO TAQIQLANADI (Shariatga zid)"
-        elif buy_points >= 2:
-            final_decision = "🟢 KUCHLI XARID (STRONG BUY) 📈"
-        elif sell_points >= 2:
-            final_decision = "🚨 KUCHLI SOTISH (STRONG SELL) 📉"
-        elif buy_points == 1 and sell_points == 0:
-            final_decision = "🟢 XARID REJIMIDA (BUY) 👍"
-        else:
-            final_decision = "🟡 KUTISH POZITSIYASI (HOLD) ↕️"
-
-        def safe_num(val, mode=None):
-            if val is None or isinstance(val, str) or val == 0: return "—"
-            if mode == "percent": return f"{round(float(val) * 100, 2)}%"
-            return f"{round(float(val), 2)}"
-
-        high_52 = safe_num(info.get('fiftyTwoWeekHigh'))
-        low_52 = safe_num(info.get('fiftyTwoWeekLow'))
-
-        javob = f"""📊 <b>{tiker_clean} | {html.escape(long_name)}</b>
-
-🏢 <b>Kompaniya profili:</b>
-• Davlat: <b>{country}</b>
-• Sektor: {html.escape(sector)}
-• Ishchilar soni: <b>{employees_str}</b>
-• Faoliyati: <i>{html.escape(summary)}</i>
-
-📈 <b>Yirik moliyaviy ko'rsatkichlar:</b>
-• Market Cap (Kapitalizatsiya): <b>{market_cap_str} {valyuta}</b>
-• Jami daromad (Revenue): <b>{daromad_str} {valyuta}</b>
-• Jami qarz (Total Debt): <b>{qarz_str} {valyuta}</b>
-• Shariat statusi: <b>{halal_status} ({debt_ratio:.1f}%)</b>
-
-━━━━━━━━━━━━━━━━━━━━
-💰 <b>Bozor narxi: {safe_num(narx)} {valyuta}</b> ({change_1d:+.2f}%)
-📈 1K: {change_1d:+.2f}% | 1H: {change_1w:+.2f}% | 1O: {change_1m:+.2f}%
-📅 52H diapazon: {high_52} / {low_52}
-
-━━━━━━━━━━━━━━━━━━━━
-📊 <b>Texnik tahlil va Koeffitsiyentlar:</b>
-• RSI (14): <b>{rsi}</b> → {rsi_signal}
-• Trend (MA): <b>{trend_status}</b>
-• Wall Street tavsiyasi: <b>{recommendation}</b>
-• P/E: {safe_num(info.get('trailingPE'))} | ROE: {safe_num(info.get('returnOnEquity'), 'percent')}
-
-━━━━━━━━━━━━━━━━━━━━
-🧠 <b>YAKUNIY BOT QARORI:</b>
-<b>{final_decision}</b>
-
-━━━━━━━━━━━━━━━━━━━━
-🔗 <a href='https://www.tradingview.com/symbols/{tiker_clean}/'>TradingView tahlili</a>"""
-        
-        return javob, tiker_clean
-    except Exception as e:
-        return f"❌ {tiker.upper()} tahlilida xatolik yuz berdi.", None
-
-# ===================== KLAVIATURALAR =====================
-def main_menu():
-    kb = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
-    kb.add(
-        types.KeyboardButton("🟢 Halol aksiyalar"), types.KeyboardButton("🔴 Harom aksiyalar"),
-        types.KeyboardButton("🏛️ NYSE birjasi"), types.KeyboardButton("💻 NASDAQ birjasi"),
-        types.KeyboardButton("🇺🇿 O'zbekiston aksiyalari"), types.KeyboardButton("🔍 RSI Skriner")
-    )
-    return kb
-
-def inline_aksiyalar(tikerlar):
-    kb = types.InlineKeyboardMarkup(row_width=3)
-    buttons = [types.InlineKeyboardButton(text=t, callback_data=f"anz_{t}") for t in tikerlar]
-    kb.add(*buttons)
-    return kb
-
-# ===================== EVENT HANDLERS =====================
-@bot.message_handler(commands=['start'])
-def start(message):
-    bot.send_message(message.chat.id, "👋 Assalomu alaykum! Aksiyalar tahlil botiga xush kelibsiz.\nTiker kiriting yoki quyidagi bo'limlardan birini tanlang:", reply_markup=main_menu())
-
-@bot.message_handler(func=lambda m: True)
-def handle_messages(message):
-    text = message.text.strip()
-    if text == "🔍 RSI Skriner":
-        bot.reply_to(message, "🔍 <b>RSI Skriner bo'yicha top kompaniyalar:</b>", parse_mode="HTML", reply_markup=inline_aksiyalar(["NVDA", "AAPL", "MSFT", "TSLA", "AMD", "AMZN"]))
-    elif text == "🟢 Halol aksiyalar":
-        bot.reply_to(message, "🟢 <b>AQSh bozoridagi halol aksiyalardan namunalar:</b>", parse_mode="HTML", reply_markup=inline_aksiyalar(["AAPL", "MSFT", "NVDA", "GOOGL", "META", "AMZN"]))
-    elif text == "🔴 Harom aksiyalar":
-        bot.reply_to(message, "🔴 <b>Shariat bo'yicha taqiqlangan aksiyalar (Banklar):</b>", parse_mode="HTML", reply_markup=inline_aksiyalar(["JPM", "BAC", "WFC"]))
-    elif text == "🏛️ NYSE birjasi":
-        bot.reply_to(message, "🏛️ <b>NYSE top aksiyalari:</b>", parse_mode="HTML", reply_markup=inline_aksiyalar(["TSCO", "BRK-B", "V", "JNJ", "WMT", "KO"]))
-    elif text == "💻 NASDAQ birjasi":
-        bot.reply_to(message, "💻 <b>NASDAQ yetakchi aksiyalari:</b>", parse_mode="HTML", reply_markup=inline_aksiyalar(["AAPL", "MSFT", "GOOGL", "NVDA", "TSLA", "AMD"]))
-    elif text == "🇺🇿 O'zbekiston aksiyalari":
-        bot.reply_to(message, "🇺🇿 <b>Toshkent fond birjasi aksiyalari:</b>\nTahlil uchun tikerlarni kiriting (Masalan: URTS, KVTS).", parse_mode="HTML")
-    else:
-        bot.send_chat_action(message.chat.id, 'typing')
-        javob, _ = aksiya_tahlil(text)
-        bot.reply_to(message, javob, parse_mode="HTML", disable_web_page_preview=True)
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("anz_"))
-def callback_handler(call):
-    ticker = call.data.split("_")[1]
-    bot.send_chat_action(call.message.chat.id, 'typing')
-    javob, _ = aksiya_tahlil(ticker)
-    bot.send_message(call.message.chat.id, javob, parse_mode="HTML", disable_web_page_preview=True)
-    bot.answer_callback_query(call.id)
-
-if __name__ == "__main__":
-    t = threading.Thread(target=run_flask)
-    t.daemon = True
-    t.start()
-    
-    while True:
-        try:
-            bot.polling(none_stop=True, skip_pending=True, timeout=60)
-        except Exception as e:
-            time.sleep(5)
+        # Katta sonlarni Trillion
