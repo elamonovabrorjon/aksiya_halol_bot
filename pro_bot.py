@@ -1,4 +1,4 @@
-      import telebot
+  import telebot
 from telebot import types
 import yfinance as yf
 import html
@@ -6,6 +6,7 @@ from functools import lru_cache
 import threading
 from flask import Flask
 import time
+import os
 
 # ===================== VEB-SERVER (RENDER LIVE STATUS) =====================
 app = Flask('')
@@ -15,7 +16,9 @@ def home():
     return "Bot muvaffaqiyatli ishlamoqda!"
 
 def run_flask():
-    app.run(host='0.0.0.0', port=10000)
+    # Render talab qiladigan asosiy PORT sozlamasi shu yerda to'g'rilandi:
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
 
 # ===================== SOZLAMALAR VA ASLIY TOKEN =====================
 TOKEN = '8781183838:AAEcHw_5d0rDnLFmA07pGFO7y4Uh8ZRTeg8'
@@ -110,4 +113,70 @@ def aksiya_tahlil(tiker: str):
         elif debt_ratio <= 40: halal_status = "🟡 SHUBHALI"
         else: halal_status = "🔴 HAROM"
 
-        # Katta sonlarni Trillion
+        # Katta sonlarni Trillion/Milliard formatga o'tkazish
+        def format_katta_son(son):
+            if not son or isinstance(son, str) or son == 0: return "—"
+            if son >= 1e12: return f"{son/1e12:.2f} T"
+            if son >= 1e9: return f"{son/1e9:.2f} B"
+            if son >= 1e6: return f"{son/1e6:.2f} M"
+            return f"{son:,}"
+
+        market_cap_str = format_katta_son(market_cap)
+        qarz_str = format_katta_son(qarz)
+        daromad_str = format_katta_son(daromad)
+
+        # Smart Baholash Algoritmi
+        buy_points = 0
+        if trend_score == 1: buy_points += 1
+        if rsi_signal == "BUY 📈": buy_points += 1
+        if "BUY" in recommendation: buy_points += 1
+        
+        sell_points = 0
+        if trend_score == -1: sell_points += 1
+        if rsi_signal == "SELL 📉": sell_points += 1
+        if "SELL" in recommendation: sell_points += 1
+
+        if halal_status == "🔴 HAROM":
+            final_decision = "🔴 SAVDO TAQIQLANADI (Shariatga zid)"
+        elif buy_points >= 2:
+            final_decision = "🟢 KUCHLI XARID (STRONG BUY) 📈"
+        elif sell_points >= 2:
+            final_decision = "🚨 KUCHLI SOTISH (STRONG SELL) 📉"
+        elif buy_points == 1 and sell_points == 0:
+            final_decision = "🟢 XARID REJIMIDA (BUY) 👍"
+        else:
+            final_decision = "🟡 KUTISH POZITSIYASI (HOLD) ↕️"
+
+        def safe_num(val, mode=None):
+            if val is None or isinstance(val, str) or val == 0: return "—"
+            if mode == "percent": return f"{round(float(val) * 100, 2)}%"
+            return f"{round(float(val), 2)}"
+
+        high_52 = safe_num(info.get('fiftyTwoWeekHigh'))
+        low_52 = safe_num(info.get('fiftyTwoWeekLow'))
+
+        javob = f"""📊 <b>{tiker_clean} | {html.escape(long_name)}</b>
+
+🏢 <b>Kompaniya profili:</b>
+• Davlat: <b>{country}</b>
+• Sektor: {html.escape(sector)}
+• Ishchilar soni: <b>{employees_str} ta</b>
+• Faoliyati: <i>{html.escape(summary)}</i>
+
+📈 <b>Yirik moliyaviy ko'rsatkichlar:</b>
+• Market Cap (Kapitalizatsiya): <b>{market_cap_str} {valyuta}</b>
+• Jami daromad (Revenue): <b>{daromad_str} {valyuta}</b>
+• Jami qarz (Total Debt): <b>{qarz_str} {valyuta}</b>
+• Shariat statusi: <b>{halal_status} ({debt_ratio:.1f}%)</b>
+
+━━━━━━━━━━━━━━━━━━━━
+💰 <b>Bozor narxi: {safe_num(narx)} {valyuta}</b> ({change_1d:+.2f}%)
+📈 1K: {change_1d:+.2f}% | 1H: {change_1w:+.2f}% | 1O: {change_1m:+.2f}%
+📅 52H diapazon: {high_52} / {low_52}
+
+━━━━━━━━━━━━━━━━━━━━
+📊 <b>Texnik tahlil va Koeffitsiyentlar:</b>
+• RSI (14): <b>{rsi}</b> → {rsi_signal}
+• Trend (MA): <b>{trend_status}</b>
+• Wall Street tavsiyasi: <b>{recommend
+    
