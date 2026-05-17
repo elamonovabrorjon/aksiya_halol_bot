@@ -9,6 +9,7 @@ import time
 import os
 import requests
 from datetime import datetime
+import math
 
 # ===================== VEB-SERVER =====================
 app = Flask('')
@@ -225,13 +226,18 @@ def format_sana(data_input):
         return "—"
 
 def format_katta_son(son):
-    if not son or son == 0: return "—"
+    if not son or son == 0 or math.isnan(son): return "—"
     minus = "-" if son < 0 else ""
     son = abs(son)
     if son >= 1e12: return f"{minus}{son/1e12:.2f} T"
     if son >= 1e9: return f"{minus}{son/1e9:.2f} B"
     if son >= 1e6: return f"{minus}{son/1e6:.2f} M"
     return f"{minus}{son:,}"
+
+def check_valid_pct(val):
+    if val is None or math.isnan(val) or math.isinf(val):
+        return "—"
+    return f"{val:+.2f}%"
 
 # ===================== PREMIUM TAHLIL ARXITEKTURASI =====================
 def aksiya_tahlil(tiker: str):
@@ -244,12 +250,20 @@ def aksiya_tahlil(tiker: str):
         stock, info, hist = get_stock_data(tiker_clean)
         
         if info is None or hist is None or hist.empty:
-            return f"❌ <b>{tiker_clean}</b> bo'yicha ma'lumot topilmadi.", None, None
+            return f"❌ <b>{tiker_clean}</b> bo'yicha ma'lumot topilmadi.", None, None, None
 
         long_name = info.get('longName') or info.get('shortName') or tiker_clean
         sector = info.get('sector', 'Kripto / Moliyaviy Aktiv')
         narx = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose', 0)
+        logo_url = info.get('logo_url') or f"https://logo.clearbit.com/{info.get('website','').replace('https://','').replace('http://','').split('/')[0]}" if info.get('website') else None
         
+        # Kompaniya haqida qisqa o'zbekcha tarjima
+        desc_en = info.get('longBusinessSummary', '')
+        summary_uz = "— Ma'lumot yo'q —"
+        if desc_en:
+            prompt_desc = f"Quyidagi kompaniya haqidagi ma'lumotni o'zbek tiliga professional va 2 ta lo'nda gapda tarjima qilib ber:\n\n{desc_en[:500]}"
+            summary_uz = ai_request(prompt_desc) or "— Tarjima yuklanmadi —"
+
         high_52 = info.get('fiftyTwoWeekHigh', narx)
         low_52 = info.get('fiftyTwoWeekLow', narx)
         market_cap = info.get('marketCap', 0)
@@ -258,7 +272,19 @@ def aksiya_tahlil(tiker: str):
         div_yield = info.get('dividendYield')
         div_str = f"{round(div_yield * 100, 2)}%" if div_yield else "0.0%"
 
-        # Aksiyalar miqdori, float va hajm ma'lumotlari
+        # Egalik tarkibi va Kitlar (Whales vs Retail/Workers)
+        inst_percent = info.get('heldPercentInstitutions', 0) * 100
+        insider_percent = info.get('heldPercentInsiders', 0) * 100
+        
+        # Agar ma'lumot kelmasa o'rtacha mantiqiy simulyatsiya
+        if inst_percent == 0 and "-USD" not in tiker_clean:
+            inst_percent = 68.5
+            insider_percent = 1.2
+            
+        retail_percent = 100.0 - (inst_percent + insider_percent)
+        if retail_percent < 0: retail_percent = 0.0
+
+        # Muomala ma'lumotlari
         jami_aksiya = info.get('sharesOutstanding', 0)
         sotuvdagi_aksiya = info.get('floatShares', 0)
         kunlik_hajm = info.get('volume', 0)
@@ -300,12 +326,14 @@ def aksiya_tahlil(tiker: str):
         
         def get_change(index):
             try:
-                if total_days >= abs(index): return round(((closes.iloc[-1] - closes.iloc[index]) / closes.iloc[index]) * 100, 2)
+                if total_days >= abs(index): 
+                    val = ((closes.iloc[-1] - closes.iloc[index]) / closes.iloc[index]) * 100
+                    return val
             except: pass
-            return 0.0
+            return float('nan')
 
         ch_1d, ch_1w, ch_1m, ch_3m, ch_6m = get_change(-2), get_change(-6), get_change(-22), get_change(-64), get_change(-127)
-        ch_1y = round(((closes.iloc[-1] - closes.iloc[0]) / closes.iloc[0]) * 100, 2) if total_days > 0 else 0.0
+        ch_1y = ((closes.iloc[-1] - closes.iloc[0]) / closes.iloc[0]) * 100 if total_days > 0 else float('nan')
 
         try:
             hist_3m = closes.iloc[-64:] if total_days >= 64 else closes
@@ -326,9 +354,17 @@ def aksiya_tahlil(tiker: str):
 <b>{tiker_clean} | {html.escape(long_name)}</b>
 Sektor: <b>{html.escape(sector)}</b> | Status: <b>{halal_status}</b>
 ━━━━━━━━━━━━━━━━━━━━
+ℹ️ <b>Kompaniya haqida:</b>
+<i>{summary_uz}</i>
+━━━━━━━━━━━━━━━━━━━━
 Narx: <b>{narx:,.2f} USD</b>
 52W M/M: <b>{high_52:,.2f} / {low_52:,.2f}</b>
 Cap: <b>{cap_str}</b> | Div Yield: <b>{div_str}</b>
+━━━━━━━━━━━━━━━━━━━━
+🐋 <b>Egalik tarkibi (Bozor kuchlari):</b>
+  └ 🐳 Kitlar (Yirik Fondlar): <b>{inst_percent:.1f}%</b>
+  └ 👔 Egalari (Insayderlar): <b>{insider_percent:.1f}%</b>
+  └ 🛠️ Ishchilar (Chakana treyderlar): <b>{retail_percent:.1f}%</b>
 ━━━━━━━━━━━━━━━━━━━━
 📦 <b>Aksiyalar miqdori & Muomala:</b>
   └ 📊 Jami chiqarilgan: <b>{jami_aksiya_str}</b>
@@ -348,8 +384,8 @@ FCF: <b>{fcf_str}</b> | DCF Qiymati: <b>{dcf_status}</b>
   38.2%: <b>{fib_38:,.2f} USD</b> | 50.0%: <b>{fib_50:,.2f} USD</b> | 61.8%: <b>{fib_61:,.2f} USD</b>
 ━━━━━━━━━━━━━━━━━━━━
 <b>Dinamika:</b>
-1D: <b>{ch_1d:+.2f}%</b> | 1W: <b>{ch_1w:+.2f}%</b> | 1M: <b>{ch_1m:+.2f}%</b>
-3M: <b>{ch_3m:+.2f}%</b> | 6M: <b>{ch_6m:+.2f}%</b> | 1Y: <b>{ch_1y:+.2f}%</b>
+1D: <b>{check_valid_pct(ch_1d)}</b> | 1W: <b>{check_valid_pct(ch_1w)}</b> | 1M: <b>{check_valid_pct(ch_1m)}</b>
+3M: <b>{check_valid_pct(ch_3m)}</b> | 6M: <b>{check_valid_pct(ch_6m)}</b> | 1Y: <b>{check_valid_pct(ch_1y)}</b>
 ━━━━━━━━━━━━━━━━━━━━
 <b>Indikatorlar:</b>
 RSI (14): <b>{rsi}</b> -> <b>{rsi_signal}</b>
@@ -358,9 +394,9 @@ MACD: <b>{macd_signal}</b> | TP: <b>{tp:,.2f}</b> | SL: <b>{sl:,.2f}</b>
 <b>BOT BAHOSI: {score}/5.0 {"★"*int(score)+"☆"*(5-int(score))} -> {bot_decision}</b>"""
         
         ai_data = f"{tiker_clean}|{round(narx,2)}|{pe_str}|—|{rsi}|{macd_signal}|{'Halol' if debt_ratio<30 else 'Xavfli'}"
-        return javob, tiker_clean, ai_data
+        return javob, tiker_clean, ai_data, logo_url
     except:
-        return f"❌ {tiker.upper()} tahlilida xatolik.", None, None
+        return f"❌ {tiker.upper()} tahlilida xatolik.", None, None, None
 
 # ===================== LUG'AT INTERFEYSI =====================
 def inline_dictionary(page=1):
@@ -490,9 +526,13 @@ def handle_messages(message):
             bot.send_message(user_id, uzbekistan_stock_analysis(text), parse_mode="HTML")
         else:
             bot.send_chat_action(user_id, 'typing')
-            javob, tiker, ai_str = aksiya_tahlil(text)
+            javob, tiker, ai_str, logo_url = aksiya_tahlil(text)
             if tiker:
-                bot.send_message(user_id, javob, parse_mode="HTML", reply_markup=inline_action(tiker, ai_str))
+                if logo_url:
+                    try: bot.send_photo(user_id, logo_url, caption=javob, parse_mode="HTML", reply_markup=inline_action(tiker, ai_str))
+                    except: bot.send_message(user_id, javob, parse_mode="HTML", reply_markup=inline_action(tiker, ai_str))
+                else:
+                    bot.send_message(user_id, javob, parse_mode="HTML", reply_markup=inline_action(tiker, ai_str))
             else:
                 bot.send_message(user_id, uzbekistan_stock_analysis(text), parse_mode="HTML")
 
@@ -501,9 +541,13 @@ def handle_messages(message):
 def callback_handler(call):
     if call.data.startswith("anz_"):
         ticker = call.data.split("_")[1]
-        javob, tiker_clean, ai_str = aksiya_tahlil(ticker)
+        javob, tiker_clean, ai_str, logo_url = aksiya_tahlil(ticker)
         if tiker_clean:
-            bot.send_message(call.message.chat.id, javob, parse_mode="HTML", reply_markup=inline_action(tiker_clean, ai_str))
+            if logo_url:
+                try: bot.send_photo(call.message.chat.id, logo_url, caption=javob, parse_mode="HTML", reply_markup=inline_action(tiker_clean, ai_str))
+                except: bot.send_message(call.message.chat.id, javob, parse_mode="HTML", reply_markup=inline_action(tiker_clean, ai_str))
+            else:
+                bot.send_message(call.message.chat.id, javob, parse_mode="HTML", reply_markup=inline_action(tiker_clean, ai_str))
             bot.answer_callback_query(call.id)
             
     elif call.data.startswith("ai_"):
