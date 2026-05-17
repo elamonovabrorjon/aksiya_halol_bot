@@ -38,14 +38,11 @@ def get_stock_data(ticker: str):
 # ===================== TEKIN AI INTEGRATSIYASI =====================
 def get_ai_advice(ticker, price, pe, de, rsi, trend, halal):
     try:
-        # Sun'iy intellekt uchun qisqa va aniq kontekst yaratamiz
         prompt = (
             f"You are a professional stock market analyst. Give a short 2-3 sentence financial advice in Uzbek language "
             f"for the stock {ticker}. Current Price: {price}, P/E Ratio: {pe}, Debt/Equity: {de}, RSI: {rsi}, "
             f"Trend: {trend}, Islamic Halal Status: {halal}. Be realistic, objective, and advise whether it's safe to buy or risky now."
         )
-        
-        # Tekin va ochiq AI API orqali so'rov yuboramiz
         response = requests.post(
             "https://text.pollinations.ai/",
             json={"messages": [{"role": "user", "content": prompt}], "model": "openai"},
@@ -214,7 +211,6 @@ def aksiya_tahlil(tiker: str):
 ━━━━━━━━━━━━━━━━━━━━
 🔗 <a href='https://www.tradingview.com/symbols/{tiker_clean}/'>TradingView tahlili</a>"""
         
-        # AI ma'lumotlarini keyinchalik ishlatish uchun qisqa lug'at qilib qaytaramiz
         ai_data = f"{tiker_clean}|{round(narx,2)}|{pe_status}|{de_status}|{rsi}|{trend_status}|{halal_status}"
         return javob, tiker_clean, ai_data
     except Exception as e:
@@ -245,7 +241,6 @@ def inline_dictionary():
 
 def inline_action(tiker, ai_string):
     kb = types.InlineKeyboardMarkup(row_width=2)
-    # AI tugmasi bosilganda barcha koeffitsiyentlarni callback_data orqali uzatamiz
     kb.add(
         types.InlineKeyboardButton("🤖 AI Maslahati", callback_data=f"ai_{ai_string}"),
         types.InlineKeyboardButton("📈 TradingView", url=f"https://www.tradingview.com/symbols/{tiker}/")
@@ -299,17 +294,22 @@ def callback_handler(call):
         bot.send_message(call.message.chat.id, javob, parse_mode="HTML", reply_markup=inline_action(tiker_clean, ai_str) if tiker_clean else None, disable_web_page_preview=True)
     
     elif call.data.startswith("ai_"):
-        # Callback ma'lumotlarini qismlarga ajratib olamiz
         try:
-            _, tiker, price, pe, de, rsi, trend, halal = call.data.split("|")
+            data_parts = call.data.split("_")[1].split("|")
+            tiker = data_parts[0]
+            price = data_parts[1]
+            pe = data_parts[2]
+            de = data_parts[3]
+            rsi = data_parts[4]
+            trend = data_parts[5]
+            halal = data_parts[6]
+            
             bot.answer_callback_query(call.id, text="🤖 Sun'iy intellekt tahlil qilmoqda...")
             bot.send_chat_action(call.message.chat.id, 'typing')
             
-            # AI maslahatini olish
             ai_advice = get_ai_advice(tiker, price, pe, de, rsi, trend, halal)
-            
             bot.send_message(call.message.chat.id, f"🤖 <b>{tiker} bo'yicha Sun'iy Intellekt Maslahati:</b>\n\n<i>\"{ai_advice}\"</i>", parse_mode="HTML")
-        except:
+        except Exception as e:
             bot.send_message(call.message.chat.id, "❌ AI tahlilini yuklashda xatolik yuz berdi.")
             
     elif call.data.startswith("dic_"):
