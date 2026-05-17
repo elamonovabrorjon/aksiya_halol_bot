@@ -8,6 +8,7 @@ from flask import Flask
 import time
 import os
 import requests
+from datetime import datetime
 
 # ===================== VEB-SERVER =====================
 app = Flask('')
@@ -26,6 +27,10 @@ bot = telebot.TeleBot(TOKEN)
 
 # 📣 ADMIN ID RAQAMI
 ADMIN_ID = 5716183424  # O'zingizning Telegram ID raqamingiz
+
+# ===================== SESSIONS (AI REJIMINI ESLAB QOLISH TIZIMI) =====================
+# Foydalanuvchilarning AI rejimida yoki yo'qligini saqlash uchun lug'at
+user_modes = {}
 
 # ===================== FOYDALANUVCHILARNI RO'YXATGA OLISH =====================
 DB_FILE = "users.txt"
@@ -133,6 +138,14 @@ def hisobla_rsi(closes, period=14):
     except:
         return 50.0, "HOLD ↕️"
 
+# ===================== SANANI FORMATLASH =====================
+def format_sana(timestamp):
+    if not timestamp: return "—"
+    try:
+        return datetime.fromtimestamp(timestamp).strftime('%d.%m.%Y')
+    except:
+        return "—"
+
 # ===================== KATTA SONLARNI FORMATLASH =====================
 def format_katta_son(son):
     if not son or son == 0: return "—"
@@ -141,7 +154,7 @@ def format_katta_son(son):
     if son >= 1e6: return f"{son/1e6:.2f} M"
     return f"{son:,}"
 
-# ===================== PREMIUM TAHLIL TIZIMI (XATOSIZ SHABLON) =====================
+# ===================== PREMIUM TAHLIL TIZIMI =====================
 def aksiya_tahlil(tiker: str):
     try:
         tiker_clean = tiker.strip().upper()
@@ -163,6 +176,29 @@ def aksiya_tahlil(tiker: str):
         
         div_yield = info.get('dividendYield')
         div_str = f"{round(div_yield * 100, 2)}%" if div_yield else "0.0%"
+
+        # 🏢 KOMPANIYA PROFILI & ISHCHILAR SONI
+        ishchilar = info.get('fullTimeEmployees')
+        ishchilar_str = f"{ishchilar:,} ta" if ishchilar else "—"
+        
+        # 📅 IPO SANASINI ANIQLASH
+        try:
+            ipo_hist = stock.history(period="max")
+            ipo_sana = ipo_hist.index[0].strftime('%d.%m.%Y') if not ipo_hist.empty else "—"
+        except:
+            ipo_sana = "—"
+
+        # 💰 DIVIDEND TAQVIMI
+        oxirgi_div_narx = info.get('lastDividendValue', '—')
+        oxirgi_div_sana = format_sana(info.get('lastDividendDate'))
+        
+        kelgusi_div_narx = info.get('dividendRate', '—')
+        if kelgusi_div_narx != '—' and div_yield:
+            kelgusi_div_str = f"{round(kelgusi_div_narx / 4, 2)} USD" if kelgusi_div_narx else "—"
+        else:
+            kelgusi_div_str = "—"
+            
+        kelgusi_div_sana = format_sana(info.get('exDividendDate'))
 
         qarz = info.get('totalDebt', 0)
         debt_ratio = (qarz / market_cap) * 100 if market_cap else 0
@@ -222,6 +258,8 @@ def aksiya_tahlil(tiker: str):
         upside = round(((target_price - narx) / narx) * 100, 2) if narx else 0.0
         insiders_count = (abs(int(hash(tiker_clean))) % 40) + 10
 
+        shares_outstanding = info.get('sharesOutstanding', 0)
+
         fondlar_matni = ""
         try:
             df_holders = stock.institutional_holders
@@ -232,11 +270,14 @@ def aksiya_tahlil(tiker: str):
                     if count >= 3: break
                     holder_name = row.get('Holder', 'Noma\'lum fond')
                     shares = row.get('Shares', 0)
-                    pct_portfolio = row.get('%Out', 0)
-                    if pct_portfolio and pct_portfolio < 1: pct_portfolio = pct_portfolio * 100
-                    shares_str = format_katta_son(shares)
                     
-                    fondlar_matni += f"  {holder_name}:\n    └ 📦 {shares_str} dona | 📊 Portfelda: {pct_portfolio:.2f}%\n"
+                    if shares_outstanding and shares:
+                        pct_portfolio = (shares / shares_outstanding) * 100
+                    else:
+                        pct_portfolio = 0.0
+                        
+                    shares_str = format_katta_son(shares)
+                    fondlar_matni += f"  {holder_name}:\n    └ 📦 {shares_str} dona | 📊 Ulushi: {pct_portfolio:.2f}%\n"
                     count += 1
             else:
                 fondlar_matni = "  Ma'lumot topilmadi\n"
@@ -261,9 +302,17 @@ def aksiya_tahlil(tiker: str):
 <b>{tiker_clean} | {html.escape(long_name)}</b>
 Sektor: <b>{html.escape(sector)}</b> | Shariat: <b>{halal_status} ({debt_ratio:.1f}%)</b>
 ━━━━━━━━━━━━━━━━━━━━
+🏢 <b>Kompaniya Profili:</b>
+  └ 📅 IPO sanasi: <b>{ipo_sana}</b>
+  └ 👥 Ishchilar soni: <b>{ishchilar_str}</b>
+━━━━━━━━━━━━━━━━━━━━
 Narx: <b>{round(narx, 2)} {valyuta}</b>
 52W M/M: <b>{round(high_52, 2)} / {round(low_52, 2)}</b>
-Cap: <b>{cap_str}</b> | Div: <b>{div_str}</b>
+Cap: <b>{cap_str}</b> | Div Yield: <b>{div_str}</b>
+━━━━━━━━━━━━━━━━━━━━
+💰 <b>Dividend Taqvimi:</b>
+  └ ↩️ Oxirgi to'langan: <b>{oxirgi_div_narx} USD</b> ({oxirgi_div_sana})
+  └ 🔜 Kelgusi (Choraklik): <b>{kelgusi_div_str}</b> ({kelgusi_div_sana})
 ━━━━━━━━━━━━━━━━━━━━
 <b>Fundamental Tahlil:</b>
 P/E: <b>{pe_str}</b> | P/B: <b>{pb_str}</b>
@@ -310,6 +359,12 @@ def main_menu():
     )
     return kb
 
+# AI rejimidan chiqish uchun maxsus klaviatura
+def ai_exit_menu():
+    kb = types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True)
+    kb.add(types.KeyboardButton("❌ AI Rejimdan chiqish"))
+    return kb
+
 def inline_dictionary():
     kb = types.InlineKeyboardMarkup(row_width=2)
     kb.add(
@@ -337,6 +392,7 @@ def inline_aksiyalar(tikerlar):
 # ===================== EVENT HANDLERS =====================
 @bot.message_handler(commands=['start'])
 def start(message):
+    user_modes[message.chat.id] = False # Rejimni sıfırlash
     save_user(message.chat.id)
     start_msg = "👋 <b>Assalomu alaykum! Aksiyalar tahlil botiga xush kelibsiz.</b>\n\nTiker kiriting yoki quyidagi bo'limlardan birini tanlang:"
     bot.send_message(message.chat.id, start_msg, parse_mode="HTML", reply_markup=main_menu())
@@ -353,39 +409,66 @@ def show_stats(message):
 def handle_messages(message):
     save_user(message.chat.id)
     text = message.text.strip()
+    user_id = message.chat.id
     
-    if text == "🔍 RSI Skriner":
-        bot.send_message(message.chat.id, "🔍 <b>RSI Skriner bo'yicha eng faol kompaniyalar:</b>", parse_mode="HTML", reply_markup=inline_aksiyalar(["NVDA", "AAPL", "MSFT", "TSLA", "AMD", "AMZN"]))
-    elif text == "🟢 Halol aksiyalar":
-        bot.send_message(message.chat.id, "🟢 <b>AQSh bozoridagi eng yirik halol aksiyalar:</b>", parse_mode="HTML", reply_markup=inline_aksiyalar(["AAPL", "MSFT", "NVDA", "GOOGL", "META", "AMZN"]))
-    elif "NYSE / NASDAQ" in text:
-        bot.send_message(message.chat.id, "🏛️ <b>NYSE va NASDAQ top kompaniyalari:</b>", parse_mode="HTML", reply_markup=inline_aksiyalar(["TSCO", "AAPL", "MSFT", "NVDA", "WMT", "KO"]))
-    elif "S&P 500" in text:
-        bot.send_message(message.chat.id, "🇺🇸 <b>S&P 500 indeksining eng nufuzli top aksiyalari:</b>", parse_mode="HTML", reply_markup=inline_aksiyalar(["SPY", "VOO", "AAPL", "MSFT", "AMZN", "BRK-B"]))
-    elif "Bloomberg Yangiliklari" in text:
-        bot.send_chat_action(message.chat.id, 'typing')
-        news_res = get_bloomberg_news()
-        bot.send_message(message.chat.id, f"📰 <b>Bloomberg | So'nggi Fond Bozori Yangiliklari:</b>\n\n{news_res}", parse_mode="HTML")
-    elif "AI Tavsiyalari" in text:
-        bot.send_chat_action(message.chat.id, 'typing')
-        prompt = "Siz moliya bo'yicha professorsiz. O'zbek tili foydalanuvchilariga hozirgi AQSh fond bozoridagi vaziyatdan kelib chiqib, qisqa 3 ta eng yaxshi aksiya tikerini va sababini o'zbek tilida tavsiya qiling."
+    # ❌ AI REJIMIDAN CHIQISH BUYRUG'I
+    if text == "❌ AI Rejimdan chiqish":
+        user_modes[user_id] = False
+        bot.send_message(user_id, "Asosiy menyuga qaytdingiz. Endi tiker yuborishingiz mumkin.", reply_markup=main_menu())
+        return
+
+    # 🤖 AGAR FOYDALANUVCHI AI MULOQOT REJIMIDA BO'LSA
+    if user_modes.get(user_id, False):
+        bot.send_chat_action(user_id, 'typing')
+        # Foydalanuvchi yozgan har qanday savolni professional moliyaviy uslubda AIga yo'llaymiz
+        prompt = (
+            f"You are a helpful financial AI assistant. Give a clear, helpful and educational answer "
+            f"in Uzbek language to the following user question or message. Always use USD or $ for currencies. "
+            f"User question: {text}"
+        )
         res = ai_request(prompt)
-        ai_msg = f"🤖 <b>AI Umumiy Bozor Tavsiyasi:</b>\n\n{res if res else 'Xizmat band.'}"
-        bot.send_message(message.chat.id, ai_msg, parse_mode="HTML")
+        bot.send_message(user_id, res if res else "🤖 Sun'iy intellekt xizmati band. Birozdan so'ng qayta urinib ko'ring.", parse_mode="HTML", reply_markup=ai_exit_menu())
+        return
+
+    # 📌 ASOSIY MENYU FUNKSIYALARI
+    if text == "🔍 RSI Skriner":
+        bot.send_message(user_id, "🔍 <b>RSI Skriner bo'yicha eng faol kompaniyalar:</b>", parse_mode="HTML", reply_markup=inline_aksiyalar(["NVDA", "AAPL", "MSFT", "TSLA", "AMD", "AMZN"]))
+    elif text == "🟢 Halol aksiyalar":
+        bot.send_message(user_id, "🟢 <b>AQSh bozoridagi eng yirik halol aksiyalar:</b>", parse_mode="HTML", reply_markup=inline_aksiyalar(["AAPL", "MSFT", "NVDA", "GOOGL", "META", "AMZN"]))
+    elif "NYSE / NASDAQ" in text:
+        bot.send_message(user_id, "🏛️ <b>NYSE va NASDAQ top kompaniyalari:</b>", parse_mode="HTML", reply_markup=inline_aksiyalar(["TSCO", "AAPL", "MSFT", "NVDA", "WMT", "KO"]))
+    elif "S&P 500" in text:
+        bot.send_message(user_id, "🇺🇸 <b>S&P 500 indeksining eng nufuzli top aksiyalari:</b>", parse_mode="HTML", reply_markup=inline_aksiyalar(["SPY", "VOO", "AAPL", "MSFT", "AMZN", "BRK-B"]))
+    elif "Bloomberg Yangiliklari" in text:
+        bot.send_chat_action(user_id, 'typing')
+        news_res = get_bloomberg_news()
+        bot.send_message(user_id, f"📰 <b>Bloomberg | So'nggi Fond Bozori Yangiliklari:</b>\n\n{news_res}", parse_mode="HTML")
+    
+    # 🤖 AI TAVSIYALARI TUGMASI BOSILGANDA (REJIMGA KIRISH)
+    elif "AI Tavsiyalari" in text:
+        user_modes[user_id] = True  # AI bilan gaplashish rejimini faollashtiramiz
+        welcome_ai_msg = (
+            "🤖 <b>Sun'iy intellekt bilan erkin muloqot rejimiga xush kelibsiz!</b>\n\n"
+            "Menga o'zingizni qiziqtirgan har qanday iqtisodiy, moliyaviy yoki bozorga oid savollaringizni yozib yuborishingiz mumkin.\n\n"
+            "<i>Masalan: 'Inflyatsiya nima?', 'Aksiyalar qanday ishlaydi?' yoki 'Diversifikatsiya haqida ma'lumot ber'</i>\n\n"
+            "Rejimni tugatib, aksiya tahliliga qaytish uchun pastdagi tugmani bosing 👇"
+        )
+        bot.send_message(user_id, welcome_ai_msg, parse_mode="HTML", reply_markup=ai_exit_menu())
+        
     elif "Kun aksiyasi" in text:
-        bot.send_chat_action(message.chat.id, 'typing')
+        bot.send_chat_action(user_id, 'typing')
         javob, tiker, ai_str = aksiya_tahlil("AAPL")
         if tiker:
-            bot.send_message(message.chat.id, javob, parse_mode="HTML", reply_markup=inline_action(tiker, ai_str))
+            bot.send_message(user_id, javob, parse_mode="HTML", reply_markup=inline_action(tiker, ai_str))
     elif text == "📖 Atamalar lug'ati":
-        bot.send_message(message.chat.id, "📖 <b>Moliyaviy tahlil lug'ati:</b>", parse_mode="HTML", reply_markup=inline_dictionary())
+        bot.send_message(user_id, "📖 <b>Moliyaviy tahlil lug'ati:</b>", parse_mode="HTML", reply_markup=inline_dictionary())
     else:
-        bot.send_chat_action(message.chat.id, 'typing')
+        bot.send_chat_action(user_id, 'typing')
         javob, tiker, ai_str = aksiya_tahlil(text)
         if tiker:
-            bot.send_message(message.chat.id, javob, parse_mode="HTML", reply_markup=inline_action(tiker, ai_str))
+            bot.send_message(user_id, javob, parse_mode="HTML", reply_markup=inline_action(tiker, ai_str))
         else:
-            bot.send_message(message.chat.id, javob, parse_mode="HTML")
+            bot.send_message(user_id, javob, parse_mode="HTML")
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
