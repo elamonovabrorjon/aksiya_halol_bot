@@ -7,7 +7,7 @@ import threading
 from flask import Flask
 import time
 
-# ===================== VEB-SERVER (RENDER BEPUL LIVE STATUSI UCHUN) =====================
+# ===================== VEB-SERVER (RENDER LIVE STATUS) =====================
 app = Flask('')
 
 @app.route('/')
@@ -15,11 +15,10 @@ def home():
     return "Bot muvaffaqiyatli ishlamoqda!"
 
 def run_flask():
-    # Render avtomatik ravishda 10000 portidan foydalanadi
     app.run(host='0.0.0.0', port=10000)
 
-# ===================== SOZLAMALAR VA TOKENS =====================
-TOKEN = '8781183838:AAH1PA_1Vm7n2SNxU7z0cOjrxrNxSPLgf2c'
+# ===================== SOZLAMALAR VA ASLIY TOKEN =====================
+TOKEN = '8781183838:AAEcHw_5d0rDnLFmA07pGFO7y4Uh8ZRTeg8'
 bot = telebot.TeleBot(TOKEN)
 
 # Cache (Tezlikni oshirish va yfinance bloklanishini oldini olish uchun)
@@ -181,13 +180,11 @@ def callback_handler(call):
 
 # ===================== BOTNI ISHGA TUSHIRISH (HIMOYA BILAN) =====================
 if __name__ == "__main__":
-    # 1. Flask veb-serverini alohida treda ishga tushiramiz
     t = threading.Thread(target=run_flask)
     t.daemon = True
     t.start()
     print("🌐 Veb-server Render portida muvaffaqiyatli boshlandi!")
 
-    # 2. Konflikt va uzilishlardan himoyalangan Polling sikli
     while True:
         try:
             print("🚀 Bot polling rejimida ishlamoqda...")
