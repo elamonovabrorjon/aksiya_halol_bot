@@ -1,5 +1,6 @@
- pyTelegramBotAPI
+pyTelegramBotAPI
 yfinance
 finnhub-python
 requests
 flask
+deep_translator
