@@ -60,7 +60,7 @@ def get_users_count():
 def get_stock_data(ticker: str):
     try:
         stock = yf.Ticker(ticker)
-        return stock, stock.info, stock.history(period="max") # IPO sanasini aniqlash uchun period "max" qilindi
+        return stock, stock.info, stock.history(period="max")
     except:
         return None, None, None
 
@@ -266,9 +266,6 @@ def aksiya_tahlil(tiker: str):
             prompt_desc = f"Quyidagi kompaniya haqidagi ma'lumotni o'zbek tiliga professional va 2 ta lo'nda gapda tarjima qilib ver:\n\n{desc_en[:500]}"
             summary_uz = ai_request(prompt_desc) or "— Tarjima yuklanmadi —"
 
-        # ===================== IPO SANASI VA TASHKIL ETILGAN YILI (Yangi qo'shilgan qism) =====================
-        founded_year = info.get('auditRisk', '—') # Ba'zi API'larda joylashuviga ko'ra o'zgaradi, yfinance'da to'g'ridan-to'g'ri founded yo'q bo'lsa info'dan qidiramiz
-        # Muqobil tahlil:
         try:
             ipo_date_raw = hist.index[0]
             ipo_sana_str = ipo_date_raw.strftime('%d.%m.%Y')
@@ -430,7 +427,7 @@ Cap: <b>{cap_str}</b> | Div Yield: <b>{div_str}</b>
   └ 📊 Jami chiqarilgan: <b>{jami_aksiya_str}</b>
   └ 🛒 Sotuvda (Float): <b>{sotuvdagi_aksiya_str}</b>
   └ 🔄 Bugungi Oldi-sotdi: <b>{kunlik_hajm_str}</b>
-  └ ⏱️ Oylik o'rtacha hajm: <b>{oylik_hajm_str}</b>
+  └ ⏱️ 3 oylik o'rtacha hajm: <b>{oylik_hajm_str}</b>
 ━━━━━━━━━━━━━━━━━━━━
 💰 <b>Dividend Taqvimi (Faqat Aksiyalar):</b>
   └ ↩️ Oxirgi: <b>{oxirgi_div_narx} USD</b> ({oxirgi_div_sana})
@@ -663,13 +660,23 @@ def callback_handler(call):
         bot.send_message(call.message.chat.id, expl, parse_mode="HTML")
         bot.answer_callback_query(call.id)
 
+# ===================== MAIN ASOSIY BLOK =====================
 if __name__ == "__main__":
+    # Veb-serverni alohida treda xavfsiz ishga tushiramiz
     t = threading.Thread(target=run_flask)
     t.daemon = True
     t.start()
     
+    # 🔥 ESKI OSILIB QOLGAN HAMMA SESSIONALARNI MAJBURIY UZISH 🔥
+    try:
+        bot.delete_webhook(drop_pending_updates=True)
+        time.sleep(2)  # Telegram serverlari yangilanishi uchun biroz kutamiz
+    except Exception as e:
+        pass
+        
+    # Bot uzluksiz ishlashi va xatolik berganda ham o'chib ketmasligi uchun tsikl
     while True:
         try:
-            bot.polling(none_stop=True, skip_pending=True, timeout=40)
-        except:
+            bot.polling(none_stop=True, skip_pending=True, timeout=50)
+        except Exception as e:
             time.sleep(3)
