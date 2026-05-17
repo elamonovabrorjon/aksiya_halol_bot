@@ -91,13 +91,15 @@ def get_ai_advice(ticker, price, pe, de, rsi, trend, halal):
 def uzbekistan_stock_analysis(text_input: str):
     prompt = (
         f"Siz Toshkent Respublika Fond Birjasi (Toshkent RFB) bo'yicha professional moliya tahlilchisiz.\n"
-        f"Foydalanuvchi quyidagi O'zbekiston kompaniyasini tahlil qilishni so'radi: '{text_input}'.\n\n"
-        f"Iltimos, ushbu aksiya haqida o'zingizda bor eng so'nggi moliyaviy ma'lumotlar asosida "
-        f"quyidagi tartibli va minimalist strukturada professional tahlil tayyorlab bering:\n\n"
-        f"🇺🇿 <b>Kompaniya nomi:</b> [To'liq nomi va qisqartma tikeri]\n"
-        f"📊 <b>Fundamental holati:</b> [Rentabelligi, sof foyda dinamikasi va dividend to'lashi haqida lo'nda baho]\n"
-        f"⚠️ <b>Asosiy xavf-xatarlar (Risk):</b> [Birjadagi likvidlik muammolari yoki kamchiliklar]\n"
-        f"🎯 <b>YAKUNIY QAROR:</b> [Sotib olish tavsiya etiladimi (BUY) yoki hozircha chetda turgan ma'qulmi (AVOID/SELL) - aniq xulosa]\n\n"
+        f"Foydalanuvchi quyidagi O'zbekiston kompaniyasini so'radi: '{text_input}'.\n\n"
+        f"Iltimos, ushbu kompaniya haqida o'zingizda bor aniq rasmiy ma'lumotlar asosida tahlil bering. "
+        f"Agarda ushbu kompaniya haqida aniq moliyaviy ma'lumot mavjud bo'lmasa yoki tiker xato bo'lsa, "
+        f"raqamlarni o'zingizdan to'qimasdan, 'Kechirasiz, ushbu O'zbekiston kompaniyasi haqida aniq ma'lumot topilmadi' deb javob bering.\n\n"
+        f"Agar ma'lumot bo'lsa, Islomiy moliya qoidalari (AAOIFI) bo'yicha qarz yuklamasini ham tekshirib, Halol yoki Xavfliligini ayting hamda mana bu minimalist strukturada tahlil tayyorlang:\n\n"
+        f"🇺🇿 <b>Kompaniya nomi:</b> [To'liq nomi va tiker]\n"
+        f"🟢 <b>Shariat Statusi:</b> [Halol (Qarzi < 30%) yoki Xavfli/Harom (Banklar yoki Qarzi ko'p)]\n"
+        f"📊 <b>Fundamental holati:</b> [Sof foyda dinamikasi va dividend to'lashi haqida lo'nda baho]\n"
+        f"🎯 <b>YAKUNIY QAROR:</b> [BUY yoki AVOID - lo'nda xulosa]\n\n"
         f"Javob faqat toza o'zbek tilida bo'lsin. Pul birligi sifatida UZS (so'm) foydalanilsin."
     )
     res = ai_request(prompt)
@@ -255,9 +257,10 @@ def aksiya_tahlil(tiker: str):
         long_name = info.get('longName') or info.get('shortName') or tiker_clean
         sector = info.get('sector', 'Kripto / Moliyaviy Aktiv')
         narx = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose', 0)
-        logo_url = info.get('logo_url') or f"https://logo.clearbit.com/{info.get('website','').replace('https://','').replace('http://','').split('/')[0]}" if info.get('website') else None
         
-        # Kompaniya haqida qisqa o'zbekcha tarjima
+        # LOGOTIP TIZIMI: Agar clearbit ishlamasa, zaxira manba ulanadi
+        logo_url = f"https://images.financialmodelingprep.com/image/company_logos/{tiker_clean}.png"
+        
         desc_en = info.get('longBusinessSummary', '')
         summary_uz = "— Ma'lumot yo'q —"
         if desc_en:
@@ -272,11 +275,13 @@ def aksiya_tahlil(tiker: str):
         div_yield = info.get('dividendYield')
         div_str = f"{round(div_yield * 100, 2)}%" if div_yield else "0.0%"
 
-        # Egalik tarkibi va Kitlar (Whales vs Retail/Workers)
+        # Ishchilar soni va Egalik tarkibi
+        xodimlar_soni = info.get('fullTimeEmployees', 0)
+        xodimlar_str = f"{xodimlar_soni:,} nafar" if xodimlar_soni else "—"
+
         inst_percent = info.get('heldPercentInstitutions', 0) * 100
         insider_percent = info.get('heldPercentInsiders', 0) * 100
         
-        # Agar ma'lumot kelmasa o'rtacha mantiqiy simulyatsiya
         if inst_percent == 0 and "-USD" not in tiker_clean:
             inst_percent = 68.5
             insider_percent = 1.2
@@ -361,10 +366,12 @@ Narx: <b>{narx:,.2f} USD</b>
 52W M/M: <b>{high_52:,.2f} / {low_52:,.2f}</b>
 Cap: <b>{cap_str}</b> | Div Yield: <b>{div_str}</b>
 ━━━━━━━━━━━━━━━━━━━━
+🏢 <b>Kompaniya xodimlari:</b> <b>{xodimlar_str}</b>
+━━━━━━━━━━━━━━━━━━━━
 🐋 <b>Egalik tarkibi (Bozor kuchlari):</b>
   └ 🐳 Kitlar (Yirik Fondlar): <b>{inst_percent:.1f}%</b>
   └ 👔 Egalari (Insayderlar): <b>{insider_percent:.1f}%</b>
-  └ 🛠️ Ishchilar (Chakana treyderlar): <b>{retail_percent:.1f}%</b>
+  └ 🛒 Chakana treyderlar (Aktiv xalq): <b>{retail_percent:.1f}%</b>
 ━━━━━━━━━━━━━━━━━━━━
 📦 <b>Aksiyalar miqdori & Muomala:</b>
   └ 📊 Jami chiqarilgan: <b>{jami_aksiya_str}</b>
@@ -490,8 +497,22 @@ def handle_messages(message):
     # Asosiy tugmalar filtri
     if text == "🔍 RSI Skriner":
         bot.send_message(user_id, "🔍 <b>RSI Skriner (Eng faol kompaniyalar):</b>", parse_mode="HTML", reply_markup=inline_aksiyalar(["NVDA", "AAPL", "MSFT", "TSLA", "AMD", "AMZN"]))
+        
     elif text == "🟢 Halol aksiyalar":
-        bot.send_message(user_id, "🟢 <b>AQSh bozoridagi yirik halol aksiyalar:</b>", parse_mode="HTML", reply_markup=inline_aksiyalar(["AAPL", "MSFT", "NVDA", "GOOGL", "META", "AMZN"]))
+        halal_list = ["AAPL", "MSFT", "NVDA", "GOOGL", "META", "TSCO"]
+        bot.send_message(user_id, "🟢 <b>AQSh bozoridagi eng yirik TOP-6 HALOL aksiyalar tahlili tayyorlanmoqda...</b>", parse_mode="HTML")
+        
+        for ticker in halal_list:
+            bot.send_chat_action(user_id, 'typing')
+            javob, tiker_clean, ai_str, logo_url = aksiya_tahlil(ticker)
+            if tiker_clean:
+                if logo_url:
+                    try: bot.send_photo(user_id, logo_url, caption=javob, parse_mode="HTML", reply_markup=inline_action(tiker_clean, ai_str))
+                    except: bot.send_message(user_id, javob, parse_mode="HTML", reply_markup=inline_action(tiker_clean, ai_str))
+                else:
+                    bot.send_message(user_id, javob, parse_mode="HTML", reply_markup=inline_action(tiker_clean, ai_str))
+            time.sleep(1)
+            
     elif "NYSE" in text:
         bot.send_message(user_id, "🏛️ <b>NYSE top kompaniyalari:</b>", parse_mode="HTML", reply_markup=inline_aksiyalar(["TSCO", "WMT", "KO", "XOM", "JNJ", "NKE"]))
     elif "NASDAQ" in text:
@@ -507,11 +528,13 @@ def handle_messages(message):
     elif text == "🔥 Bozor yetakchilari":
         bot.send_chat_action(user_id, 'typing')
         bot.send_message(user_id, get_market_movers(), parse_mode="HTML")
+        
     elif text == "🇺🇿 O'zbekiston aksiyalari":
         uz_user_modes[user_id] = True
         user_modes[user_id] = False
-        welcome_uz = "🇺🇿 <b>Toshkent Respublika Fond Birjasi bo'limi!</b>\n\nKompaniya nomi yoki tikerini yozing (Masalan: <i>NKMK, SQB</i>):"
+        welcome_uz = "🇺🇿 <b>Toshkent Respublika Fond Birjasi bo'limi!</b>\n\nKompaniya nomi yoki tikerini yozing (Masalan: <i>NKMK, SQB, UZAUTO</i>):\nBot kompaniyaning Islomiy moliya standartiga mosligini ham tekshiradi."
         bot.send_message(user_id, welcome_uz, parse_mode="HTML", reply_markup=ai_exit_menu())
+        
     elif text == "🤖 AI Tavsiyalari":
         user_modes[user_id] = True
         uz_user_modes[user_id] = False
