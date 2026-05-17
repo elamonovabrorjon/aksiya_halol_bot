@@ -278,7 +278,13 @@ def aksiya_tahlil(tiker: str):
         cap_str = format_katta_son(market_cap)
         
         div_yield = info.get('dividendYield')
-        div_str = f"{round(div_yield * 100, 2)}%" if div_yield else "0.0%"
+        if div_yield:
+            if div_yield > 1.0:
+                div_str = f"{round(div_yield, 2)}%"
+            else:
+                div_str = f"{round(div_yield * 100, 2)}%"
+        else:
+            div_str = "0.0%"
 
         xodimlar_soni = info.get('fullTimeEmployees', 0)
         xodimlar_str = f"{xodimlar_soni:,} nafar" if xodimlar_soni else "—"
@@ -291,17 +297,15 @@ def aksiya_tahlil(tiker: str):
         qarz_str = format_katta_son(qarz) + " USD" if qarz else "—"
         sof_foyda_str = format_katta_son(sof_foyda) + " USD" if sof_foyda else "—"
 
+        shares_outstanding = info.get('sharesOutstanding', 0)
         inst_percent = info.get('heldPercentInstitutions', 0) * 100
         insider_percent = info.get('heldPercentInsiders', 0) * 100
         
         if inst_percent == 0 and "-USD" not in tiker_clean:
             inst_percent = 68.5
             insider_percent = 1.2
-            
-        retail_percent = 100.0 - (inst_percent + insider_percent)
-        if retail_percent < 0: retail_percent = 0.0
 
-        # ===================== DINAMIK KITLAR ANALIZI =====================
+        # 🔥 KITLARNING SOTUVI/SOTIB OLISHINI DONASIGACHA ANIQ HISOBLASH BLOKI 🔥
         kitlar_matni = ""
         if "-USD" not in tiker_clean:
             try:
@@ -320,18 +324,45 @@ def aksiya_tahlil(tiker: str):
                         for k_key, k_label in mashhur_kitlar.items():
                             if k_key.lower() in holder_name.lower():
                                 shares = row.get('Shares', 0)
-                                pct = row.get('% Out', 0)
-                                if pct and pct < 1.0: pct = pct * 100
-                                tutilgan_kitlar.append(f"  └ {k_label}: <b>{format_katta_son(shares)} dona</b> (<b>{pct:.2f}%</b>)")
+                                change_raw = row.get('Change', 0) # Oxirgi chorakdagi o'zgarish soni
+                                
+                                # Matematik aniq ulush foizi
+                                if shares_outstanding and shares:
+                                    pct = (shares / shares_outstanding) * 100.0
+                                else:
+                                    pct = row.get('% Out', 0)
+                                    if pct and pct < 1.0: pct = pct * 100
+                                
+                                # Choraklik sotish/sotib olish dinamikasini donasigacha aniqlash
+                                dinamika_str = ""
+                                if change_raw and not math.isnan(change_raw) and change_raw != 0:
+                                    formatted_change = format_katta_son(change_raw)
+                                    if change_raw < 0:
+                                        dinamika_str = f" (🔴 {formatted_change} sotdi)"
+                                    else:
+                                        dinamika_str = f" (🟢 +{formatted_change} oldi)"
+                                else:
+                                    dinamika_str = " (⚪ o'zgarishsiz)"
+                                    
+                                tutilgan_kitlar.append(f"  └ {k_label}: <b>{format_katta_son(shares)} dona</b> ({pct:.2f}%){dinamika_str}")
                                 break
                     if tutilgan_kitlar:
-                        kitlar_matni = "━━━━━━━━━━━━━━━━━━━━\n🐋 <b>YIRIK KITLARNING ULUSHI (Top Fondlar):</b>\n" + "\n".join(tutilgan_kitlar) + "\n"
+                        kitlar_matni = "━━━━━━━━━━━━━━━━━━━━\n🐋 <b>YIRIK KITLARNING ULUSHI & CHORAKLIK DINAMIKASI:</b>\n" + "\n".join(tutilgan_kitlar) + "\n"
                     else:
-                        kitlar_matni = "━━━━━━━━━━━━━━━━━━━━\n🐋 <b>YIRIK KITLARNING ULUSHI (Top Fondlar):</b>\n  └ Top-5 yirik fond ro'yxatda topilmadi.\n"
+                        kitlar_matni = "━━━━━━━━━━━━━━━━━━━━\n🐋 <b>YIRIK KITLARNING ULUSHI:</b>\n  └ Top-5 yirik fond ro'yxatda topilmadi.\n"
                 else:
-                    kitlar_matni = "━━━━━━━━━━━━━━━━━━━━\n🐋 <b>YIRIK KITLARNING ULUSHI (Top Fondlar):</b>\n  └ Ma'lumot vaqtincha yuklanmadi.\n"
+                    kitlar_matni = "━━━━━━━━━━━━━━━━━━━━\n🐋 <b>YIRIK KITLARNING ULUSHI:</b>\n  └ Ma'lumot vaqtincha yuklanmadi.\n"
             except:
-                kitlar_matni = "━━━━━━━━━━━━━━━━━━━━\n🐋 <b>YIRIK KITLARNING ULUSHI (Top Fondlar):</b>\n  └ Ma'lumot topilmadi.\n"
+                kitlar_matni = "━━━━━━━━━━━━━━━━━━━━\n🐋 <b>YIRIK KITLARNING ULUSHI:</b>\n  └ Ma'lumot topilmadi.\n"
+
+        # Umumiy egalik tarkibini 100% muvozanatga keltirish
+        total_calculated_ownership = inst_percent + insider_percent
+        if total_calculated_ownership > 100.0:
+            inst_percent = (inst_percent / total_calculated_ownership) * 100.0
+            insider_percent = (insider_percent / total_calculated_ownership) * 100.0
+            retail_percent = 0.0
+        else:
+            retail_percent = 100.0 - total_calculated_ownership
 
         jami_aksiya = info.get('sharesOutstanding', 0)
         sotuvdagi_aksiya = info.get('floatShares', 0)
@@ -383,9 +414,9 @@ def aksiya_tahlil(tiker: str):
         ch_1y = ((closes.iloc[-1] - closes.iloc[-252]) / closes.iloc[-252]) * 100 if total_days > 252 else float('nan')
 
         try:
-            hist_3m = closes.iloc[-64:] if total_days >= 64 else closes
-            diff_3m = hist_3m.max() - hist_3m.min()
-            fib_38, fib_50, fib_61 = hist_3m.max() - (diff_3m * 0.382), hist_3m.max() - (diff_3m * 0.500), hist_3m.max() - (diff_3m * 0.618)
+            text_hist_3m = closes.iloc[-64:] if total_days >= 64 else closes
+            diff_3m = text_hist_3m.max() - text_hist_3m.min()
+            fib_38, fib_50, fib_61 = text_hist_3m.max() - (diff_3m * 0.382), text_hist_3m.max() - (diff_3m * 0.500), text_hist_3m.max() - (diff_3m * 0.618)
         except:
             fib_38 = fib_50 = fib_61 = narx
 
@@ -662,21 +693,19 @@ def callback_handler(call):
 
 # ===================== MAIN ASOSIY BLOK =====================
 if __name__ == "__main__":
-    # Veb-serverni alohida treda xavfsiz ishga tushiramiz
     t = threading.Thread(target=run_flask)
     t.daemon = True
     t.start()
     
-    # 🔥 ESKI OSILIB QOLGAN HAMMA SESSIONALARNI MAJBURIY UZISH 🔥
     try:
         bot.delete_webhook(drop_pending_updates=True)
-        time.sleep(2)  # Telegram serverlari yangilanishi uchun biroz kutamiz
+        time.sleep(2)  
     except Exception as e:
         pass
         
-    # Bot uzluksiz ishlashi va xatolik berganda ham o'chib ketmasligi uchun tsikl
     while True:
         try:
             bot.polling(none_stop=True, skip_pending=True, timeout=50)
         except Exception as e:
             time.sleep(3)
+
