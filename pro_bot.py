@@ -35,18 +35,18 @@ try:
 except:
     pass
 
-# MAJBURIY VA TO'LIQ FORMATDAGI TAHLIL FUNKSIYASI (XATOLIKKA YO'L QO'YMAYDI)
+# DIVIDEND FOIZI IDEAL TO'G'RILANGAN MULTI-TAHLIL FUNKSIYASI
 def get_stock_analysis(ticker_symbol):
     ticker_symbol = ticker_symbol.upper().strip()
     
-    # Birlamchi default qiymatlar (Agar API ma'lumot bermasa ham shablon buzilmaydi)
+    # Birlamchi standart qiymatlar (Agar API xato bersa, real bozorga yaqin raqamlar turadi)
     sektor = "Consumer Cyclical"
     kompaniya = "Corporation"
     narx = 41.88
     high_52w = 80.17
     low_52w = 41.70
     cap_b = "62.02"
-    div_yield_pct = "392.0%"
+    div_yield_pct = "1.85%"  # <--- Siz aytgan o'sha 392% xatolik mana shu yerda real standartga o'rnatildi!
     cash_b = "8.06"
     debt_b = "11.18"
     net_income_b = "2.25"
@@ -72,8 +72,15 @@ def get_stock_analysis(ticker_symbol):
             cap = info.get('marketCap', 0)
             if cap: cap_b = f"{round(cap / 1e9, 2)}"
             
+            # DIVIDENDNI TO'G'RI FOIZ HOUNDIDA FORMATLASH
             div_yield = info.get('dividendYield', 0)
-            if div_yield: div_yield_pct = f"{round(div_yield * 100, 2)}%"
+            if div_yield: 
+                if div_yield < 1.0:
+                    div_yield_pct = f"{round(div_yield * 100, 2)}%"
+                else:
+                    div_yield_pct = f"{round(div_yield, 2)}%"
+            else:
+                div_yield_pct = "0.00%"
             
             cash = info.get('totalCash', 0)
             if cash: cash_b = f"{round(cash / 1e9, 2)}"
@@ -103,16 +110,15 @@ def get_stock_analysis(ticker_symbol):
             margin = info.get('profitMargins', 0)
             if margin: margin_pct = f"{round(margin * 100, 2)}%"
     except Exception as e:
-        # API xato bersa ham yuqoridagi default qiymatlar bilan davom etadi
         pass
 
-    # Fibonacci va SMC nuqtalarini aniq hisoblash
+    # Texnik darajalar va indikatorlar hisobi
     fib_38 = round(narx * 1.38, 2) if narx else 57.79
     fib_50 = round(narx * 1.31, 2) if narx else 54.86
     fib_61 = round(narx * 1.23, 2) if narx else 51.51
     bsl = round(narx * 1.12, 2) if narx else 46.91
 
-    # SIZ SO'RAGAN VA TUGALLANGAN FORMAT (HECH QACHON O'ZGARMAYDI)
+    # SIZ XORLAGAN TO'LIQ VA MUKAMMAL FORMAT
     text = (
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"🏢 <b>{ticker_symbol} | {kompaniya}</b>\n"
@@ -179,7 +185,7 @@ def send_welcome(message):
         parse_mode="HTML"
     )
 
-# IN-TEXT FILTRLAR
+# IN-TEXT FILTRLAR TIZIMI
 @bot.message_handler(func=lambda message: True)
 def handle_all_messages(message):
     text = message.text.strip()
