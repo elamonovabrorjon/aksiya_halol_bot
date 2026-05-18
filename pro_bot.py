@@ -7,7 +7,9 @@ from telebot import types
 import yfinance as yf
 from flask import Flask
 
-# 1. FLASK SERVER (Render o'chirmasligi uchun)
+# =====================================================================
+# 1. RENDER PORTINI ESHITISH UCHUN FLASK SERVER (Bot o'chmasligi uchun)
+# =====================================================================
 app = Flask('')
 
 @app.route('/')
@@ -21,22 +23,20 @@ def run_flask():
     except Exception as e:
         print(f"Flask server xatosi: {e}")
 
-# Flaskni zudlik bilan ishga tushirish
+# Flaskni zudlik bilan alohida oqimda ishga tushirish
 flask_thread = threading.Thread(target=run_flask)
 flask_thread.daemon = True
 flask_thread.start()
 
-# 2. TOKЕNNI SERVER XOTIRASIDAN OLISH
-TOKEN = os.environ.get("BOT_TOKEN")
-
-# Agar Render-da o'zgaruvchi ulanmagan bo'lsa xato bermasligi uchun tekshirish
-if not TOKEN:
-    print("XATOLIK: BOT_TOKEN muhit o'zgaruvchisi Render'da topilmadi!")
-    sys.exit(1)
-
+# =====================================================================
+# 2. TELEGRAM BOT TOKENI (To'g'ridan-to'g'ri kod ichiga joylashtirildi)
+# =====================================================================
+TOKEN = "8781183838:AAEcHw_5d0rDnLFmA07pGFO7y4Uh8ZRTeg8"
 bot = telebot.TeleBot(TOKEN)
 
-# 3. TAHLIL MANTIQI
+# =====================================================================
+# 3. MUKAMMAL TAHLIL FUNKSIYASI (Barcha hisob-kitoblar va format saqlangan)
+# =====================================================================
 def get_stock_analysis(ticker_symbol):
     ticker_symbol = ticker_symbol.upper().strip()
     try:
@@ -120,7 +120,9 @@ def get_stock_analysis(ticker_symbol):
     )
     return text, None
 
-# 4. TUGMALAR VA SAMBOLLAR
+# =====================================================================
+# 4. TELEGRAM MENYU VA TUGMALARI (Eskilari to'liq joyida)
+# =====================================================================
 def main_keyboard():
     markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     markup.add(
@@ -134,7 +136,7 @@ def main_keyboard():
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.send_message(message.chat.id, "👋 Tiker kiriting (Masalan: AAPL):", reply_markup=main_keyboard())
+    bot.send_message(message.chat.id, "👋 Tiker kiriting (Masalan: NKE):", reply_markup=main_keyboard())
 
 @bot.message_handler(func=lambda message: True)
 def handle_all_messages(message):
@@ -169,9 +171,11 @@ def handle_all_messages(message):
 def callback_ai(call):
     ticker = call.data.split('_')[1]
     bot.answer_callback_query(call.id, text="AI yuklanmoqda...")
-    bot.send_message(call.message.chat.id, f"🤖 <b>AI ({ticker}):</b> SMC tahliliga ko'ra risk minimal darajada.", parse_mode="HTML")
+    bot.send_message(call.message.chat.id, f"🤖 <b>AI Maslahati ({ticker}):</b> SMC tahliliga ko'ra risk minimal darajada.", parse_mode="HTML")
 
-# 5. POLLING REJIMINI TURN ON QILISH
+# =====================================================================
+# 5. BOTNI POLLING REJIMIDA ISHGA TUSHIRISH (INFINITY POLLING)
+# =====================================================================
 if __name__ == "__main__":
     print("Bot ishlashga tayyor...")
     while True:
