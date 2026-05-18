@@ -1,6 +1,5 @@
-pyTelegramBotAPI
-yfinance
-finnhub-python
-requests
-flask
-deep_translator
+pyTelegramBotAPI==4.26.0
+yfinance==0.2.54
+pandas==2.2.3
+requests==2.32.3
+Flask==3.0.3
