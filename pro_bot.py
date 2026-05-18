@@ -10,6 +10,7 @@ from flask import Flask, request
 import time
 import html
 import math
+from datetime import datetime
 
 # ===================== VEB-SERVER (RENDER UCHUN) =====================
 app = Flask(__name__)
@@ -80,6 +81,19 @@ def format_katta_son(son):
     if val >= 1e6:  return f"{val/1e6:.2f} M"
     return f"{val:,.0f}"
 
+# 💰 Dividend sanasini chiroyli matnga o'tkazish funksiyasi
+def format_sana(ts):
+    if ts is None: return "Yaqinda yo'q"
+    try:
+        # Agar Unix Timestamp (son) ko'rinishida kelsa
+        return datetime.fromtimestamp(int(ts)).strftime('%Y-%m-%d')
+    except:
+        try:
+            # Agar string ko'rinishida kelib soatlari bo'lsa, faqat kunini olamiz
+            return str(ts).split(" ")[0]
+        except:
+            return "Yaqinda yo'q"
+
 # ===================== TEXNIK INDIKATORLAR =====================
 def hisobla_rsi(closes, period=14):
     try:
@@ -123,7 +137,7 @@ def hisobla_smart_money_likvidlik(hist, joriy_narx):
         return yaqin_likvidlik, kutilma
     except: return "Tahlilda cheklov.", "Kutish."
 
-# ===================== INTERACTIVE BACKUP AI SYSTEM =====================
+# ===================== INTERACTIVE AI SYSTEM =====================
 def ai_request(prompt: str, timeout: int = 10):
     models = ["mistral-large", "openai", "qwen-coder"]
     for model in models:
@@ -138,7 +152,7 @@ def get_ai_advice(ticker):
     if info is None: return "Kompaniya ma'lumotlarini yuklab bo'lmadi."
     rsi, _ = hisobla_rsi(hist['Close'] if hist is not None else None)
     prompt = f"Analyze {ticker} stock (RSI: {rsi}). Write a 2-sentence professional Smart Money advice in Uzbek."
-    return ai_request(prompt) or f"Algoritmik Tahlil: {ticker} aktivida RSI {rsi} ko'rsatkichida. Smart Money tahlili yangilanmoqda."
+    return ai_request(prompt) or f"Algoritmik Tahlil: {ticker} aktivida RSI {rsi} ko'rsatkichida. Smart Money manipulyatsiyasi o'rganilmoqda."
 
 # ===================== MAIN MENU GENERATOR =====================
 def main_menu():
@@ -188,7 +202,6 @@ def aksiya_tahlil(tiker: str):
         debt_ratio = (total_debt / market_cap) * 100 if market_cap > 1 else 0
         halal = "HALOL 🟢" if debt_ratio < 33 else "XAVFLI/SHUBHALI 🔴"
 
-        # Sektor va maxsus belgilar (Sintaksis xatosi butkul tuzatildi)
         sektor = info.get('sector', "Ma'lumot topilmadi")
         xodimlar = info.get('fullTimeEmployees', 0)
         
@@ -206,11 +219,13 @@ def aksiya_tahlil(tiker: str):
         day_volume = safe_float(info.get('volume') or 0)
         avg_volume = safe_float(info.get('averageVolume') or 0)
 
-        # Dividend ma'lumotlari (Foiz xatoligi to'g'rilandi)
+        # Dividend ma'lumotlari (To'g'rilangan Ex-Date sanasi bilan)
         div_rate = safe_float(info.get('dividendRate') or 0)
         div_yield = safe_float(info.get('dividendYield') or 0) * 100
+        ex_date_raw = info.get('exDividendDate')
+        kesilish_sanasi = format_sana(ex_date_raw)
 
-        # Kitlar ulushi va nomlari (G'alati foizlar o'rniga aniq sonlar chiqariladi)
+        # Kitlar ulushi va nomlari
         inst_text = ""
         yirik_kitlar_jami_ulushi = 0.0
         if not is_crypto:
@@ -250,7 +265,6 @@ def aksiya_tahlil(tiker: str):
 
         logo = f"https://images.financialmodelingprep.com/image/company_logos/{tiker_clean}.png" if not is_crypto else "https://cdn-icons-png.flaticon.com/512/2272/2272825.png"
 
-        # 💎 Ikkala skrinshotdagi barcha ma'lumotlarni birlashtirgan o'sha siz so'ragan UZUN MATN:
         text = f"""━━━━━━━━━━━━━━━━━━━━
 🏢 <b>{tiker_clean} | {html.escape(info.get('longName', tiker_clean))}</b>
 Sektor: {sektor} | Status: <b>{halal}</b>
@@ -280,7 +294,7 @@ Top Ega Fondlar ro'yxati:
 ━━━━━━━━━━━━━━━━━━━━
 💰 Dividend Taqvimi (Barcha Sanalar):
   └ ↩️ Oxirgi to'langan dividend: {div_rate:.2f} USD
-  └ 📅 Oxirgi kesilish: {info.get('exDividendDate', 'Yaqinda yoq')}
+  └ 📅 Oxirgi kesilish: <b>{kesilish_sanasi}</b>
 ━━━━━━━━━━━━━━━━━━━━
 Fundamental Ko'rsatkichlar:
 P/E: {info.get('trailingPE', '—')} | P/B: {info.get('priceToBook', '—')} | EPS: {info.get('trailingEps', '—')} USD
@@ -321,29 +335,46 @@ def handle_messages(message):
     text = message.text.strip()
     uid = message.chat.id
 
+    # 1. Rejimdan chiqish sharti
     if text in ["❌ Rejimdan chiqish", "chiqish", "/cancel"]:
         user_modes[uid] = False
         uz_user_modes[uid] = False
         return bot.send_message(uid, "Asosiy menyudasiz.", reply_markup=main_menu())
 
+    # 2. AI interaktiv rejimida savol-javob (oldingidek doimiy ishlaydi)
     if user_modes.get(uid, False):
-        res = ai_request(f"Savolga o'zbekcha lo'nda javob bering:\n{text}")
-        return bot.send_message(uid, res or "AI hozir band.")
+        res = ai_request(f"Savolga o'zbekcha lo'nda va professional javob bering:\n{text}")
+        return bot.send_message(uid, res or "AI hozir band. Birozdan so'ng urinib ko'ring.")
 
+    # 3. AI Tavsiyalari rejimini yoqish
     if text == "🤖 AI Tavsiyalari":
         user_modes[uid] = True
         kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
         kb.add(types.KeyboardButton("❌ Rejimdan chiqish"))
-        return bot.send_message(uid, "Savolingizni yozing:", reply_markup=kb)
+        return bot.send_message(uid, "🤖 <b>AI interaktiv maslahat rejimi yoqildi!</b>\n\nEndi istalgan savolingizni yozishingiz mumkin:", parse_mode="HTML", reply_markup=kb)
 
-    if text not in ["🌐 Global Pul Oqimi", "🚀 TOP Signal", "🪙 Kripto bozori", "🔥 Bozor yetakchilari", "📰 Fond bozori yangiliklari", "📖 Atamalar lug'ati", "🧠 Kunlik Test", "🐋 Kitlar kuzatuvida", "🇺🇿 O'zbekiston aksiyalari", "🟢 Halol aksiyalar"]:
-        j, tc, l = aksiya_tahlil(text)
-        if tc:
-            try: bot.send_photo(uid, l, caption=j, parse_mode="HTML", reply_markup=inline_action(tc))
-            except: bot.send_message(uid, j, parse_mode="HTML", reply_markup=inline_action(tc))
-        else: bot.send_message(uid, j, parse_mode="HTML")
+    # 4. Alohida menyu tugmalari uchun mantiqiy javoblar
+    if text == "🧠 Kunlik Test":
+        return bot.send_message(uid, "🧠 <b>Bugungi Kunlik Test:</b>\n\nKompaniyaning qarz koeffitsiyenti (Debt-to-Equity) qaysi ko'rsatkichdan past bo'lsa, Islom moliya mezonlariga ko'ra halol hisoblanadi?\n\nA) 50%\nB) 33% 🟢\nC) 45%\nD) 20%", parse_mode="HTML")
+
+    if text == "📖 Atamalar lug'ati":
+        return bot.send_message(uid, "📖 <b>Asosiy Atamalar:</b>\n\n🔹 <b>RSI</b> — Aksiyaning haddan quangacha sotilgan/sotib olinganini ko'rsatuvchi ko'rsatkich.\n🔹 <b>SSL</b> — Chakana treyderlarning stop-loss buyruqlari yig'ilgan likvidlik hovuzi.", parse_mode="HTML")
+
+    if text == "🟢 Halol aksiyalar":
+        return bot.send_message(uid, "🟢 <b>Ommabop Halol Aksiyalar:</b>\n\n🍏 AAPL (Apple)\n🚗 TSLA (Tesla)\n💻 NVDA (Nvidia)\n👟 NKE (Nike)\n\n<i>Eslatma: Ko'rsatkichlar har chorakda yangilanadi.</i>", parse_mode="HTML")
+
+    # Boshqa tizimli menyu tugmalari
+    MENYU_TUGMALARI = ["🌐 Global Pul Oqimi", "🚀 TOP Signal", "🪙 Kripto bozori", "🔥 Bozor yetakchilari", "📰 Fond bozori yangiliklari", "🐋 Kitlar kuzatuvida", "🇺🇿 O'zbekiston aksiyalari", "🏛️ NYSE birjasi", "🏬 NASDAQ birjasi", "🇺🇸 S&P 500 indeks"]
+    if text in MENYU_TUGMALARI:
+        return bot.send_message(uid, f"📊 <b>{text}</b> bo'limi tahlili faollashtirilmoqda.", parse_mode="HTML")
+
+    # 5. Agar hech qaysi tugma bo'lmasa - Tiker tahlili ishlaydi
+    j, tc, l = aksiya_tahlil(text)
+    if tc:
+        try: bot.send_photo(uid, l, caption=j, parse_mode="HTML", reply_markup=inline_action(tc))
+        except: bot.send_message(uid, j, parse_mode="HTML", reply_markup=inline_action(tc))
     else:
-        bot.send_message(uid, f"📊 {text} bo'limi faol. Tiker kiritsangiz, hamma ma'lumotni birdaniga ko'rasiz.")
+        bot.send_message(uid, j, parse_mode="HTML")
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
