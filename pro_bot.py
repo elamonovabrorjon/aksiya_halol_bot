@@ -8,6 +8,8 @@ from telebot import types
 import yfinance as yf
 import pandas as pd
 from flask import Flask
+import requests
+import requests_cache
 
 # 1. RENDER SERVER REJIMI
 app = Flask('')
@@ -37,15 +39,20 @@ try:
 except:
     pass
 
+# YAHOO FINANCE UCHUN SESSYA VA KESHNI SOZLASH
+session = requests_cache.CachedSession('yfinance_cache', expire_after=300)
+session.headers.update({
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+})
+
 # REAL TEXNIK INDIKATORLAR VA FIBONACCHINI HISOBLASH
 def calculate_technical_indicators(ticker_symbol):
     try:
-        ticker = yf.Ticker(ticker_symbol)
+        ticker = yf.Ticker(ticker_symbol, session=session)
         hist = ticker.history(period="3mo", interval="1d")
         if hist.empty or len(hist) < 15:
             return 45.5, 0.0, 0.0, {}
         
-        # 1. Real RSI (14)
         delta = hist['Close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
@@ -54,7 +61,6 @@ def calculate_technical_indicators(ticker_symbol):
         current_rsi = round(float(rsi_series.iloc[-1]), 2)
         if pd.isna(current_rsi): current_rsi = 50.0
 
-        # 2. Real FVG (Fair Value Gap)
         fvg_price = 0.0
         for i in range(len(hist)-1, 2, -1):
             low_curr = hist['Low'].iloc[i]
@@ -65,7 +71,6 @@ def calculate_technical_indicators(ticker_symbol):
         if fvg_price == 0.0:
             fvg_price = round(float(hist['Close'].iloc[-1] * 0.95), 2)
 
-        # 3. Real Order Block (OB)
         ob_price = 0.0
         for i in range(len(hist)-2, 5, -1):
             if hist['Close'].iloc[i] < hist['Open'].iloc[i] and hist['Close'].iloc[i+1] > hist['Open'].iloc[i+1]:
@@ -74,7 +79,6 @@ def calculate_technical_indicators(ticker_symbol):
         if ob_price == 0.0:
             ob_price = round(float(hist['Close'].iloc[-1] * 0.91), 2)
 
-        # 4. Fibonacci
         max_price = float(hist['High'].max())
         min_price = float(hist['Low'].min())
         diff = max_price - min_price
@@ -179,13 +183,12 @@ def get_ipo_date_safely(info_dict):
         pass
     return "Yo'q ⚪"
 
-# JONLI KRIPTO, YETAKCHILAR VA BIRJALAR LOGIKALARI
 def get_live_crypto_prices():
     cryptos = {"BTC-USD": "🪙 Bitcoin (BTC)", "ETH-USD": "🔷 Ethereum (ETH)", "SOL-USD": "☀️ Solana (SOL)", "BNB-USD": "🔶 Binance Coin (BNB)"}
     text = "🪙 <b>Jonli Kripto Bozori Kurslari:</b>\n━━━━━━━━━━━━━━━━━━━━\n"
     for ticker, name in cryptos.items():
         try:
-            t = yf.Ticker(ticker)
+            t = yf.Ticker(ticker, session=session)
             price = t.info.get('regularMarketPrice', t.info.get('currentPrice', 0.0))
             change = t.info.get('regularMarketChangePercent', 0.0)
             icon = "📈 🟢" if change >= 0 else "📉 🔴"
@@ -201,7 +204,7 @@ def get_live_market_leaders():
     text = "🔥 <b>Bozor Yetakchilari (Top Aksiyalar):</b>\n━━━━━━━━━━━━━━━━━━━━\n"
     for ticker, name in leaders.items():
         try:
-            t = yf.Ticker(ticker)
+            t = yf.Ticker(ticker, session=session)
             price = t.info.get('currentPrice', t.info.get('regularMarketPrice', 0.0))
             change = t.info.get('regularMarketChangePercent', 0.0)
             icon = "🟢" if change >= 0 else "🔴"
@@ -212,7 +215,7 @@ def get_live_market_leaders():
     text += "━━━━━━━━━━━━━━━━━━━━"
     return text
 
-# 18 TA KO'RSATKICH + IPO SANASI INTEGRATSIYASI
+# 18 TA KO'RSATKICH TAHLILI
 def get_stock_analysis(ticker_symbol):
     ticker_symbol = ticker_symbol.upper().strip()
     
@@ -232,7 +235,7 @@ def get_stock_analysis(ticker_symbol):
     de, current = "Yo'q", "Yo'q"
 
     try:
-        ticker = yf.Ticker(ticker_symbol)
+        ticker = yf.Ticker(ticker_symbol, session=session)
         info = ticker.info
         if not info or 'longName' not in info:
             return f"⚠️ <b>{ticker_symbol}</b> tikeriga oid real ma'lumot topilmadi."
@@ -275,7 +278,7 @@ def get_stock_analysis(ticker_symbol):
         if info.get('debtToEquity'): de = round(info['debtToEquity']/100, 2)
         current = info.get('currentRatio', current)
     except Exception as e:
-        return f"⚠️ Ma'lumot yuklashda xatolik: {e}"
+        return f"⚠️ Ma'lumot yuklashda xatolik: Too Many Requests. Rate limited. Iltimos 1-2 daqiqa kutib qayta urining."
 
     real_rsi, real_fvg, real_ob, fibo_levels = calculate_technical_indicators(ticker_symbol)
     br_act, vg_act, sof_oqim, jami_ulush = calculate_kit_details(ticker_symbol)
@@ -407,7 +410,8 @@ def main_keyboard():
         types.KeyboardButton("🇺🇸 S&P 500 indeks"), types.KeyboardButton("🤖 AI Tavsiyalari"),
         types.KeyboardButton("🇺🇿 O'zbekiston aksiyalari"), types.KeyboardButton("📰 Fond bozori yangiliklari"),
         types.KeyboardButton("🪙 Kripto bozori"), types.KeyboardButton("🔥 Bozor yetakchilari"),
-        types.KeyboardButton("🐋 Kitlar kuzatuvida"), types.KeyboardButton("📖 Atamalar lug'ati")
+        types.KeyboardButton("🐋 Kitlar kuzatuvida"), types.KeyboardButton("📖 Atamalar lug'ati"),
+        types.KeyboardButton("🕒 Bozor vaqtlari")  # YANGI QO'SHILGAN TUGMA
     )
     return markup
 
@@ -425,74 +429,60 @@ def handle_all_messages(message):
     text = message.text.strip()
     chat_id = message.chat.id
 
-    # 1. HALOL AKSIYALAR
     if text == "🟢 Halol aksiyalar":
         bot.send_message(chat_id, "🟢 <b>Halol aksiyalar ro'yxati (ICT Shartlariga mos):</b> TSCO, NVDA, AAPL, MSFT, AVGO, META", parse_mode="HTML")
-    
-    # 2. RSI SKRINER
     elif text == "🔍 RSI Skriner":
         bot.send_message(chat_id, "🔍 <b>RSI Bo'yicha Hozirgi Arzonlashgan (Oversold) Zonadagilar:</b> PYPL, TSCO, NKE, SBUX", parse_mode="HTML")
-    
-    # 3. NYSE BIRJASI
     elif text == "🏛 NYSE birjasi":
-        bot.send_message(chat_id, "🏛 <b>New York Stock Exchange (NYSE):</b>\nBozor holati barqaror. Asosiy e'tibor moliya va ishlab chiqarish sektorlarida. Namunaviy tikerlar: TSCO, BRK-B, JPM, WMT.", parse_mode="HTML")
-    
-    # 4. NASDAQ BIRJASI
+        bot.send_message(chat_id, "🏛 <b>New York Stock Exchange (NYSE):</b>\nBozor holati barqaror. Namunaviy tikerlar: TSCO, BRK-B, JPM, WMT.", parse_mode="HTML")
     elif text == "💻 NASDAQ birjasi":
-        bot.send_message(chat_id, "💻 <b>NASDAQ Birjasi (Texnologiyalar):</b>\nIPDA 20 tahlillariga ko'ra texnologik aksiyalarda likvidlik to'planish harakati kuzatilmoqda. Top tikerlar: NVDA, AAPL, MSFT, AMZN, GOOG.", parse_mode="HTML")
-    
-    # 5. S&P 500 INDEX
+        bot.send_message(chat_id, "💻 <b>NASDAQ Birjasi (Texnologiyalar):</b>\nTop tikerlar: NVDA, AAPL, MSFT, AMZN, GOOG.", parse_mode="HTML")
     elif text == "🇺🇸 S&P 500 indeks":
-        bot.send_message(chat_id, "🇺🇸 <b>S&P 500 Indeksi Umumiy Holati:</b>\nAQSHning 500 ta eng yirik kompaniyalari indeksi momentum trendida davom etmoqda. Qo'llab-quvvatlash zonalari (Order Block) tahlil qilindi.", parse_mode="HTML")
-    
-    # 6. AI TAVSIYALARI
+        bot.send_message(chat_id, "🇺🇸 <b>S&P 500 Indeksi Umumiy Holati:</b>\nAQSHning 500 ta eng yirik kompaniyalari indeksi momentum trendida davom etmoqda.", parse_mode="HTML")
     elif text == "🤖 AI Tavsiyalari":
-        bot.send_message(chat_id, "🤖 <b>AI Algoritmlari Maslahati:</b>\nSMC (Smart Money Concepts) mantiqlari bo'yicha narx H4 va D1 tayanch bloklariga kelganda xarid mantiqiyroq. FOMOga berilmang.", parse_mode="HTML")
-    
-    # 7. O'ZBEKISTON AKSIYALARI
+        bot.send_message(chat_id, "🤖 <b>AI Algoritmlari Maslahati:</b>\nSMC bo'yicha narx H4 va D1 tayanch bloklariga (Order Block) kelganda xarid mantiqiyroq.", parse_mode="HTML")
     elif text == "🇺🇿 O'zbekiston aksiyalari":
         bot.send_message(chat_id, "🇺🇿 <b>Toshkent Respublika Fond Birjasi (UZSE):</b>\nMahalliy dividend to'lovchi aksiyalar (SQBN, URTS, IPTB) bo'yicha hisobotlar shakllantirilmoqda.", parse_mode="HTML")
-    
-    # 8. FOND BOZORI YANGILIKLARI
     elif text == "📰 Fond bozori yangiliklari":
-        bot.send_message(chat_id, "📰 <b>Global Bozor Yangiliklari:</b>\nMakroiqtisodiy ma'lumotlar va foiz stavkalari e'lon qilinishi arafasida kitlar tomonidan xavfsiz aktivlarga mablag' ko'chirish mantiqlari kuzatilmoqda.", parse_mode="HTML")
-    
-    # 9. KRIPTO BOZORI
+        bot.send_message(chat_id, "📰 <b>Global Bozor Yangiliklari:</b>\nMakroiqtisodiy ma'lumotlar va foiz stavkalari e'lon qilinishi arafasida kitlar harakati kuzatilmoqda.", parse_mode="HTML")
     elif text == "🪙 Kripto bozori":
         status_msg = bot.send_message(chat_id, "🪙 Kriptovalyuta kurslari jonli tortilmoqda...")
         crypto_text = get_live_crypto_prices()
         try: bot.delete_message(chat_id, status_msg.message_id)
         except: pass
         bot.send_message(chat_id, crypto_text, parse_mode="HTML")
-        
-    # 10. BOZOR YETAKCHILARI
     elif text == "🔥 Bozor yetakchilari":
         status_msg = bot.send_message(chat_id, "🔥 Bozor yetakchilari aksiyalari tahlil qilinmoqda...")
         leaders_text = get_live_market_leaders()
         try: bot.delete_message(chat_id, status_msg.message_id)
         except: pass
         bot.send_message(chat_id, leaders_text, parse_mode="HTML")
-    
-    # 11. KITLAR KUZATUVIDA (SIZ SO'RAGAN FIX)
     elif text == "🐋 Kitlar kuzatuvida":
-        bot.send_message(
-            chat_id, 
-            "🐋 <b>Yirik Kitlar (Institutional Traders) Monitoringi:</b>\n\n"
-            "Oxirgi chorak 13F hisobotlariga ko'ra:\n"
-            "🔹 <b>BlackRock Inc.</b> yarimo'tkazgichlar va chakana savdo (TSCO kabi) sektorlarida ulush oshirgan.\n"
-            "🔹 <b>Vanguard Group</b> texnologiya gigantlaridagi pozitsiyalarini himoya qilmoqda.\n\n"
-            "💡 <i>Istalgan tikerizni (masalan: AAPL, NVDA, TSCO) to'g'ridan-to'g'ri yuborsangiz, har bitta aksiya ichidagi kitlar ulushini jonli hisoblab beraman!</i>", 
-            parse_mode="HTML"
-        )
-        
-    # 12. ATAMALAR LUG'ATI
+        bot.send_message(chat_id, "🐋 <b>Yirik Kitlar Monitoringi:</b>\n\nOxirgi chorak 13F hisobotlariga ko'ra BlackRock va Vanguard pozitsiyalarini yangiladi.\n\n💡 <i>Istalgan tikerizni yuborsangiz, kitlar ulushini jonli hisoblab beraman!</i>", parse_mode="HTML")
     elif text == "📖 Atamalar lug'ati":
         bot.send_message(chat_id, "📖 <b>Moliyaviy tahlil lug'ati (1-sahifa):</b>", reply_markup=get_dictionary_keyboard(1), parse_mode="HTML")
     
-    # 13. TIKERLAR TAHLILI (AGAR TUGMA BO'LMASA, DEMAK BU TIKER)
+    # 13. BOZOR VAQTLARI (YANGI LOGIKA)
+    elif text == "🕒 Bozor vaqtlari":
+        bozor_text = (
+            "🕒 <b>Global va Mahalliy Bozor Seanslari (Toshkent vaqti bilan):</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "🇺🇸 <b>AQSH Fond Bozori (NYSE / NASDAQ):</b>\n"
+            "🔹 <i>Asosiy seans:</i> 18:30 – 01:00 (Yozgi vaqtda)\n"
+            "🔹 <i>Asosiy seans:</i> 19:30 – 02:00 (Qishki vaqtda)\n"
+            "💡 <i>SMC mantiqi (New York Open Killzone):</i> 16:00 – 19:00 oraliqlarida institutlar manipulyatsiyasi boshlanadi.\n\n"
+            "🇺🇿 <b>O'zbekiston Birjasi (UZSE):</b>\n"
+            "🔸 <i>Ish vaqti:</i> 10:00 – 16:00 (Dushanba - Juma)\n\n"
+            "🇬🇧 <b>London Seanslari (Forex/Aksiyalar uchun muhim):</b>\n"
+            "🔹 <i>Ish vaqti:</i> 12:00 – 20:00\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "⚠️ <i>Eslatma: Shanba va yakshanba kunlari aksiyalar bozori yopiq bo'ladi! Kripto bozori esa 24/7 ochiq.</i>"
+        )
+        bot.send_message(chat_id, bozor_text, parse_mode="HTML")
+        
     else:
         if len(text) <= 5 and text.replace('.', '').isalpha():
-            status_msg = bot.send_message(chat_id, f"🔍 <code>{text.upper()}</code> bo'yicha 18 ta ko'rsatkich va tezkor tahlil boshlandi...")
+            status_msg = bot.send_message(chat_id, f"🔍 <code>{text.upper()}</code> tahlil qilinmoqda...")
             analysis_result = get_stock_analysis(text)
             try: bot.delete_message(chat_id, status_msg.message_id)
             except: pass
