@@ -3,6 +3,7 @@ import sys
 import time
 import datetime
 import threading
+import multiprocessing
 import telebot
 from telebot import types
 import yfinance as yf
@@ -11,7 +12,10 @@ from flask import Flask
 import requests
 import requests_cache
 
-# 1. RENDER SERVER REJIMI (TUZATILGAN INTEGRATSIYA)
+# MULTIPROCESSING XAVFSIZLIGI (Render-da Status 1 xatosini yo'qotadi)
+multiprocessing.freeze_support()
+
+# 1. RENDER SERVER REJIMI
 app = Flask('')
 
 @app.route('/')
@@ -19,21 +23,15 @@ def home():
     return "ONLINE"
 
 def run_flask():
-    # Render taqdim etadigan dinamik portni olish (bo'lmasa 8080)
     port = int(os.environ.get("PORT", 8080))
     try:
-        # debug va reloader-ni o'chirish Render serverida qotishlarni oldini oladi
-        app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+        app.run(host='0.0.0.0', port=port)
     except Exception as e:
         print(f"Flask xatosi: {e}")
 
-# Flaskni fondagi oqimda (Thread) xavfsiz ishga tushirish
 flask_thread = threading.Thread(target=run_flask)
 flask_thread.daemon = True
 flask_thread.start()
-
-# Server to'liq yuklanishi uchun 2 soniya kutish
-time.sleep(2)
 
 # 2. TELEGRAM BOT ULANISHI
 TOKEN = "8781183838:AAEcHw_5d0rDnLFmA07pGFO7y4Uh8ZRTeg8"
@@ -42,10 +40,10 @@ bot = telebot.TeleBot(TOKEN)
 try:
     bot.remove_webhook()
     time.sleep(1)
-except Exception as e:
-    print(f"Webhook tozalashda xato: {e}")
+except:
+    pass
 
-# YAHOO FINANCE UCHUN SESSYA VA KESHNI SOZLASH
+# YAHOO FINANCE UCHUN SESSYA VA KESHNI SOZLASH (Too Many Requests himoyasi)
 session = requests_cache.CachedSession('yfinance_cache', expire_after=300)
 session.headers.update({
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -119,7 +117,7 @@ def get_sector_pe_status(val, sector):
             if f < 25: return f"{f} 🟢 (Arzon)"
             elif f <= 45: return f"{f} 🟢 (Sektor me'yorida)"
             elif f <= 60: return f"{f} 🟡 (Qimmatroq)"
-            else: return f"{f} 🔴 (Haddan taxation qimmat)"
+            else: return f"{f} 🔴 (Haddan tashqari qimmat)"
         elif "finance" in sector or "financial" in sector:
             if f < 12: return f"{f} 🟢 (Juda jozibador)"
             elif f <= 18: return f"{f} 🟢 (Me'yorda)"
@@ -468,6 +466,7 @@ def handle_all_messages(message):
     elif text == "📖 Atamalar lug'ati":
         bot.send_message(chat_id, "📖 <b>Moliyaviy tahlil lug'ati (1-sahifa):</b>", reply_markup=get_dictionary_keyboard(1), parse_mode="HTML")
     
+    # 13. BOZOR VAQTLARI
     elif text == "🕒 Bozor vaqtlari":
         bozor_text = (
             "🕒 <b>Global va Mahalliy Bozor Seanslari (Toshkent vaqti bilan):</b>\n"
@@ -510,27 +509,6 @@ def callback_router(call):
     if data.startswith('ai_'):
         ticker = data.split('_')[1]
         bot.send_message(chat_id, f"🤖 <b>AI Ekspert xulosasi ({ticker}):</b> Barcha fundamental filtrlar va 18 ta jonli indikator muvaffaqiyatli qayta ishlandi.", parse_mode="HTML")
-    
-    # LUG'AT TUGMALARI UCHUN SAHIFA YANGILASH LOGIKASI (TUZATILDI)
-    elif data.startswith('dict_page'):
-        page_num = int(data.replace('dict_page', ''))
-        try:
-            bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=call.message.message_id,
-                text=f"📖 <b>Moliyaviy tahlil lug'ati ({page_num}-sahifa):</b>",
-                reply_markup=get_dictionary_keyboard(page_num),
-                parse_mode="HTML"
-            )
-        except Exception as e:
-            print(f"Lug'at navigatsiya xatosi: {e}")
 
-# DOIMIY POLLING SIKLI (XATOLIKLARDA BOT O'CHMAYDI)
 if __name__ == "__main__":
-    print("Aksiya Halol Bot Render serverida ishga tushdi...")
-    while True:
-        try:
-            bot.polling(none_stop=True, interval=0, timeout=40)
-        except Exception as e:
-            print(f"Polling xatosi yuz berdi: {e}. 5 soniyadan keyin qayta urinadi...")
-            time.sleep(5)
+    bot.polling(none_stop=True, interval=0, timeout=20)
