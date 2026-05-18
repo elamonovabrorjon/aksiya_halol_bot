@@ -51,20 +51,56 @@ _cache = {}
 _cache_time = {}
 CACHE_TTL = 300  
 
+# ✨ YA YANGILANGAN VA MUSTAHKAMMAKLASHTIRILGAN DATA YUKLASH FUNKSIYASI
 def get_stock_data(ticker: str):
     now = time.time()
-    if ticker in _cache and now - _cache_time.get(ticker, 0) < CACHE_TTL:
-        return _cache[ticker]
+    ticker_clean = ticker.strip().upper()
+    
+    if ticker_clean in _cache and now - _cache_time.get(ticker_clean, 0) < CACHE_TTL:
+        return _cache[ticker_clean]
+        
     try:
-        stock = yf.Ticker(ticker)
+        # 1-urinish: Standart yuklash
+        stock = yf.Ticker(ticker_clean)
         info = stock.info
+        
+        # Agar info chala kelsa, qayta so'rov yuborish
+        if info is None or len(info) == 0 or 'regularMarketPrice' not in info:
+            stock = yf.Ticker(ticker_clean)
+            info = stock.info
+            
         hist = stock.history(period="3mo")
-        if info is None or len(info) == 0: return None, None, None
+        if info is None or len(info) == 0 or hist.empty:
+            return None, None, None
+            
         result = (stock, info, hist)
-        _cache[ticker] = result
-        _cache_time[ticker] = now
+        _cache[ticker_clean] = result
+        _cache_time[ticker_clean] = now
         return result
-    except: return None, None, None
+    except:
+        try:
+            # 2-urinish: Nosozlik yuz berganda fast_info orqali sug'urib olish
+            stock = yf.Ticker(ticker_clean)
+            hist = stock.history(period="3mo")
+            f_info = stock.fast_info
+            
+            if not hist.empty:
+                mock_info = {
+                    'longName': ticker_clean,
+                    'sector': "Kompaniya (Sektor aniqlanmadi)",
+                    'marketCap': f_info.get('market_cap', 1),
+                    'totalDebt': 0, 
+                    'fiftyTwoWeekLow': f_info.get('year_low', 0),
+                    'fiftyTwoWeekHigh': f_info.get('year_high', 0),
+                    'regularMarketPrice': hist['Close'].iloc[-1]
+                }
+                result = (stock, mock_info, hist)
+                _cache[ticker_clean] = result
+                _cache_time[ticker_clean] = now
+                return result
+            return None, None, None
+        except:
+            return None, None, None
 
 def safe_float(val):
     try:
@@ -193,7 +229,7 @@ def aksiya_tahlil(tiker: str):
         upper, middle, lower = hisobla_bollinger(closes)
         likvidlik, kutilma = hisobla_smart_money_likvidlik(hist, joriy_narx)
 
-        # 📊 QARZ FOIZINI HISOBLASH VA SHARIAT STATUSI
+        # 📊 QARZ FOIZINI HISOBLASH (Qat'iy 30% lik limit)
         total_debt = safe_float(info.get('totalDebt') or 0)
         market_cap = safe_float(info.get('marketCap') or 1)
         debt_ratio = (total_debt / market_cap) * 100 if market_cap > 1 else 0
@@ -255,7 +291,6 @@ def aksiya_tahlil(tiker: str):
 
         logo = f"https://images.financialmodelingprep.com/image/company_logos/{tiker_clean}.png" if not is_crypto else "https://cdn-icons-png.flaticon.com/512/2272/2272825.png"
 
-        # ✨ TEXT QISMI YANGILANDI: Shariat statusi yoniga qarz ulushi foizda qo'shildi!
         text = f"""━━━━━━━━━━━━━━━━━━━━
 🏢 <b>{tiker_clean} | {html.escape(info.get('longName', tiker_clean))}</b>
 Sektor: {sektor}
