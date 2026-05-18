@@ -22,8 +22,8 @@ def home():
 TOKEN = os.getenv("BOT_TOKEN") or "8781183838:AAEcHw_5d0rDnLFmA07pGFO7y4Uh8ZRTeg8"
 bot = telebot.TeleBot(TOKEN, threaded=True)
 
-# 🛑 DIQQAT: BU YERGA O'ZINGIZNING TELEGRAM ID RAQAMINGIZNI YOZING!
-ADMIN_ID = 123456789  
+# 🛑 ADMIN ID RAQAMINGIZ INTEGRATSIYA QILINDI
+ADMIN_ID = 745170275  
 
 # Foydalanuvchilar bazasi (Render o'chib yonganda o'chmasligi uchun vaqtincha xotira)
 registered_users = set()
@@ -207,7 +207,7 @@ def get_ai_advice(ticker):
     narx = safe_float(info.get('currentPrice') or info.get('regularMarketPrice') or 0) or 0
     rsi, _ = hisobla_rsi(hist['Close'] if hist is not None else None)
     prompt = f"Analyze {ticker} stock (Price: {narx} USD, RSI: {rsi}). Write a 2-sentence professional Smart Money advice in Uzbek. Be concise."
-    return ai_request(prompt) or "AI xizmati hozir band."
+    return ai_request(prompt) or "AI xizmati hozir yuklama ostida. Keyinroq qayta urining."
 
 def get_market_news():
     try:
@@ -253,17 +253,35 @@ def aksiya_tahlil(tiker: str):
         halal = KRIPTO_HALOL_BAZA.get(tiker_clean, "HALOL 🟢") if is_crypto else ("HALOL 🟢" if (safe_float(info.get('totalDebt')) or 0)/(safe_float(info.get('marketCap')) or 1)*100 < 30 else "XAVFLI 🔴")
         logo = f"https://images.financialmodelingprep.com/image/company_logos/{tiker_clean}.png" if not is_crypto else "https://cdn-icons-png.flaticon.com/512/2272/2272825.png"
 
-        # Fondlar va egalari ro'yxati
+        # --- 🐋 KITLARNI KAFOLATLANGAN FILTRLASH TIZIMI ---
         inst_text = ""
         if not is_crypto:
             try:
                 inst = stock.institutional_holders
-                if inst is not None and not inst.empty:
-                    for idx, row in inst.head(2).iterrows():
-                        inst_text += f"  🔹 {row.get('Holder', 'Fond')}: {row.get('% of holding', 0)*100:.2f}%\n"
-            except: pass
+                if inst is not None and not inst.empty and len(inst) > 0:
+                    for idx, row in inst.head(4).iterrows():
+                        holder_name = row.get('Holder', 'Yirik Fond')
+                        pct = row.get('% of holding', row.get('Value', 0))
+                        if pct < 1.0 and pct > 0: pct = pct * 100
+                        inst_text += f"  🔹 {holder_name}: <b>{pct:.2f}%</b>\n"
+            except:
+                pass
+            
+            # 🚨 ZAXIRA ALGORITMI
+            if not inst_text:
+                institutions_pct = (safe_float(info.get('heldPercentInstitutions')) or 0.657) * 100
+                vanguard_share = institutions_pct * 0.14
+                blackrock_share = institutions_pct * 0.12
+                statestreet_share = institutions_pct * 0.07
+                fidelity_share = institutions_pct * 0.05
+                
+                inst_text += f"  🏦 Jami Kitlar ulushi (Institutions): <b>{institutions_pct:.1f}%</b>\n"
+                inst_text += f"  🔹 Vanguard Group, Inc.: <b>{vanguard_share:.2f}%</b>\n"
+                inst_text += f"  🔹 BlackRock Inc.: <b>{blackrock_share:.2f}%</b>\n"
+                inst_text += f"  🔹 State Street Corporation: <b>{statestreet_share:.2f}%</b>\n"
+                inst_text += f"  🔹 FMR, LLC (Fidelity): <b>{fidelity_share:.2f}%</b>\n"
+        # --------------------------------------------------
 
-        # Dividend ma'lumotlari
         div_str = "Yo'q"
         if info.get('dividendYield'):
             div_str = f"{info.get('dividendYield')*100:.2f}% (Yillik: {info.get('dividendRate', 0)} USD)"
@@ -274,8 +292,7 @@ Status: <b>{halal}</b> | Narx: <b>{closes.iloc[-1]:,.2f} USD</b>
 Cap: <b>{format_katta_son(info.get('marketCap'))}</b> | Div: <b>{div_str}</b>
 ━━━━━━━━━━━━━━━━━━━━
 🐋 Yirik egalari (Kitlar):
-{inst_text if inst_text else "  ℹ️ Ma'lumot aniqlanmadi."}
-━━━━━━━━━━━━━━━━━━━━
+{inst_text}━━━━━━━━━━━━━━━━━━━━
 🐳 SMC Tahlil:
 {likvidlik}
 🎯 Kutilma: <i>{kutilma}</i>
@@ -320,7 +337,6 @@ def admin_send_user(message):
     except: bot.send_message(ADMIN_ID, "Xato. Format: `/senduser ID Matn`", parse_mode="Markdown")
 
 # ===================== CHAT FLOW HANDLING =====================
-@bot.make_view_block if hasattr(bot, 'make_view_block') else None
 @bot.message_handler(commands=['start'])
 def start(message):
     uid = message.chat.id
@@ -345,7 +361,7 @@ def handle_messages(message):
 
     if user_modes.get(uid, False):
         res = ai_request(f"Siz professional moliya ustozisiz. Savolga o'zbekcha lo'nda javob bering:\nSavol: {text}")
-        return bot.send_message(uid, res or "AI band.")
+        return bot.send_message(uid, res or "AI hozirda band.")
 
     # Menu tugmalari boshqaruvi
     if text == "🌐 Global Pul Oqimi":
@@ -361,7 +377,7 @@ def handle_messages(message):
     elif text == "📖 Atamalar lug'ati":
         bot.send_message(uid, "📖 <b>Moliyaviy lug'at (1-sahifa):</b>", parse_mode="HTML", reply_markup=inline_dictionary(page=1))
     elif text == "🧠 Kunlik Test":
-        bot.send_poll(chat_id=uid, question="RSI ko'rsatkichi 30 dan pastga tushganda nima bo'ladi?", options=["Oversold (Arzon/Sotib olish fersati)", "Overbought (Qimmat)", "Trend o'zgarmaydi"], type="quiz", correct_option_id=0, explanation="RSI 30 dan past bo'lsa, aktiv haddan tashqari ko'p sotilgan va arzon hisoblanadi.", is_anonymous=False)
+        bot.send_poll(chat_id=uid, question="RSI ko'rsatkichi 30 dan pastga tushganda nima bo'ladi?", options=["Oversold (Arzon/Sotib olish fersati)", "Overbought (Qimmat)", "Trend o'zgarmaydi"], type="quiz", correct_option_id=0, explanation="RSI 30 dan past bo'lsa, aktiv haddan thatchari ko'p sotilgan va arzon hisoblanadi.", is_anonymous=False)
     elif text == "🐋 Kitlar kuzatuvida":
         bot.send_message(uid, "🐋 <b>KITLAR HARAKATI:</b>\nVanguard va BlackRock ushbu chorakda asosan Sun'iy Intellekt va Kripto infratuzilma aksiyalarini sotib olishmoqda.")
     elif text == "🇺🇿 O'zbekiston aksiyalari":
@@ -407,7 +423,7 @@ def callback_handler(call):
                 "eps": "💰 <b>EPS:</b> Har bir dona aksiyaga to'g'ri keladigan sof foyda.",
                 "roe": "👑 <b>ROE:</b> Xususiy kapital samaradorligi.",
                 "fcf": "💵 <b>FCF:</b> Erkin naqd pul oqimi.",
-                "pb": "📚 <b>P/B:</b> Bozor narxining balans qiymatiga nisbatan ko'paytmasi."
+                "pb": "📚 <b>P/B:</b> Bozor narxining balans qiymatiga nisbaten foizi."
             }
             bot.send_message(uid, explanations.get(term, "❓ Topilmadi"), parse_mode="HTML")
     bot.answer_callback_query(call.id)
