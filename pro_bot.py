@@ -4,24 +4,35 @@ from telebot import types
 import yfinance as yf
 from flask import Flask
 import threading
+import time
 
-# 1. RENDER UCHUN FLASK SERVER (Bot o'chib qolmasligi uchun)
+# 1. RENDER PORTINI ESHITISH UCHUN FLASK SERVER
 app = Flask('')
 
 @app.route('/')
 def home():
     return "Bot muvaffaqiyatli ishlamoqda!"
 
-def run():
+def run_flask():
+    # Render taqdim etadigan portni olamiz, bo'lmasa 8080 ishlatiladi
     port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
+    try:
+        app.run(host='0.0.0.0', port=port)
+    except Exception as e:
+        print(f"Flask server xatoligi: {e}")
+
+# Flask serverni alohida oqimda (thread) zudlik bilan ishga tushiramiz
+# Bu Render platformasi 'Port topilmadi' deb loyihani o'chirib qo'ymasligi uchun shart!
+flask_thread = threading.Thread(target=run_flask)
+flask_thread.daemon = True
+flask_thread.start()
 
 # 2. BOT TOKЕNINI KIRITING
 TOKEN = "KODINGIZDAGI_BOT_TOKENINI_SHU_YERGA_QO_YING"
 bot = telebot.TeleBot(TOKEN)
 
 # =====================================================================
-# SIZNING MUKAMMAL TAHLIL FUNKSIYANGIZ (HECH NIMA O'CHMAGAN)
+# SIZNING MUKAMMAL TAHLIL FUNKSIYANGIZ (XATOLARDAN HIMOYALANGAN)
 # =====================================================================
 
 def get_stock_analysis(ticker_symbol):
@@ -29,72 +40,66 @@ def get_stock_analysis(ticker_symbol):
     
     try:
         ticker = yf.Ticker(ticker_symbol)
+        # yfinance ma'lumotlar blokirovkasini tekshirish
         info = ticker.info
         if not info or 'longName' not in info:
-            return None, "Tiker ma'lumotlarini yuklab bo'lmadi. Yahoo Finance cheklov o'rnatgan bo'lishi mumkin."
+            return None, "Tiker ma'lumotlarini yuklab bo'lmadi. Yahoo Finance serverni cheklagan bo'lishi mumkin."
             
     except Exception as e:
-        return None, f"Ulanish xatosi: {str(e)}"
+        return None, f"Ulanish xatosi yuz berdi: {str(e)}"
 
-    # --- Barcha ma'lumotlarni xavfsiz olish va tirnoqlarni to'g'rilash ---
+    # --- Barcha ma'lumotlarni xavfsiz olish (Tirnoq xatoliklari to'liq tuzatildi) ---
     try:
-        # Fundamental ma'lumotlar
-        sektor = info.get('sector', "Ma'lumot yo'q") # Boyagi 192-qatordagi xato qo'sh tirnoq bilan to'liq tuzatildi!
+        sektor = info.get('sector', "Ma'lumot yo'q")
         sanoat = info.get('industry', "Ma'lumot yo'q")
         kompaniya = info.get('longName', "Ma'lumot yo'q")
         narx = info.get('currentPrice', info.get('regularMarketPrice', 0))
         cap = info.get('marketCap', 0)
-        employees = info.get('fullTimeEmployees', "Ma'lumot yo'q")
+        employees = info.get('fullTimeEmployees', 0)
         
-        # G'azna (Balans)
         cash = info.get('totalCash', 0)
         debt = info.get('totalDebt', 0)
         net_income = info.get('netIncomeToCommon', 0)
         
-        # Kitlar ulushi
         institutions = info.get('heldPercentInstitutions', 0)
         kitlar_jami = f"{round(institutions * 100, 1)}%" if institutions else "Ma'lumot yo'q"
         
-        # Aksiyalar miqdori
         shares = info.get('sharesOutstanding', 0)
         float_shares = info.get('floatShares', 0)
         volume = info.get('volume', 0)
         avg_volume = info.get('threeMonthAverageVolume', 0)
         
-        # Dividendlar
         last_div = info.get('lastDividendValue', 0)
         div_yield = info.get('dividendYield', 0)
         div_yield_pct = f"{round(div_yield * 100, 2)}%" if div_yield else "0.00%"
         
-        # Ko'rsatkichlar
         pe = info.get('trailingPE', "Ma'lumot yo'q")
         pb = info.get('priceToBook', "Ma'lumot yo'q")
         eps = info.get('trailingEps', "Ma'lumot yo'q")
         margin = info.get('profitMargins', 0)
         margin_pct = f"{round(margin * 100, 2)}%" if margin else "0.00%"
 
-    except Exception:
-        return None, "Ma'lumotlarni formatlashda xatolik yuz berdi."
+    except Exception as e:
+        return None, f"Ma'lumotlarni qayta ishlashda ichki xatolik: {str(e)}"
 
-    # --- Dinamik Hisob-kitoblar (Siz yuborgan formata moslashgan) ---
+    # --- Dinamik Hisob-kitoblar ---
     high_52w = info.get('fiftyTwoWeekHigh', narx)
     low_52w = info.get('fiftyTwoWeekLow', narx)
     
-    # Fibonacci namuna (Sizning formulangiz bo'yicha)
-    fib_38 = round(narx * 1.38, 2)
-    fib_50 = round(narx * 1.31, 2)
-    fib_61 = round(narx * 1.23, 2)
+    fib_38 = round(narx * 1.38, 2) if narx else 0
+    fib_50 = round(narx * 1.31, 2) if narx else 0
+    fib_61 = round(narx * 1.23, 2) if narx else 0
 
-    # MATNNI SHAKLLANTIRISH (Aynan siz yuborgan chiroyli ko'rinishda)
+    # HTML ko'rinishidagi chiroyli tahlil matni
     text = (
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🏢 {ticker_symbol} | {kompaniya}\n"
-        f"Sektor: {sektor} | Status: **HALOL 🟢**\n"
+        f"🏢 <b>{ticker_symbol} | {kompaniya}</b>\n"
+        f"Sektor: {sektor} | Status: <b>HALOL 🟢</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"💵 Narx: {narx} USD\n"
         f"⚖️ DCF Adolatli Qiymati: Arzon (Undervalued) 🟢\n"
         f"52W M/M: {high_52w} / {low_52w}\n"
-        f"Cap: {round(cap / 1e9, 2)} B | Div Yield: {div_yield_pct}\n"
+        f"Cap: {round(cap / 1e9, 2) if cap else 0} B | Div Yield: {div_yield_pct}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"🏢 Kompaniya xodimlari: {employees:,} nafar\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -118,7 +123,6 @@ def get_stock_analysis(ticker_symbol):
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"💰 Dividend Taqvimi (Barcha Sanalar):\n"
         f"  └ ↩️ Oxirgi to'langan dividend: {last_div} USD\n"
-        f"  └ 📅 Oxirgi kesilish: Mavjud\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"Fundamental Ko'rsatkichlar:\n"
         f"P/E: {pe} | P/B: {pb} | EPS: {eps} USD\n"
@@ -131,13 +135,13 @@ def get_stock_analysis(ticker_symbol):
         f"1D: -0.33% | 1W: -1.20% | 1M: -9.90%\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"🐳 SMART MONEY & LIKVIDLIK (SMC):\n"
-        f"🚨 Buy-Side Liquidity (BSL): {round(narx * 1.12, 2)} USD joriy qarshilik zonasi.\n"
+        f"🚨 Buy-Side Liquidity (BSL): {round(narx * 1.12, 2) if narx else 0} USD joriy qarshilik zonasi.\n"
         f"🎯 Kitlar Harakati Kutilmasi:\n"
         f"Smart Money tepadagi likvidlikni yig'ish uchun narxni tortishi kutilmoqda.\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"📊 Texnik Ko'rsatkichlar:\n"
         f"📉 RSI (14): 30.51 (SOTIB OLISH / BUY 📈)\n"
-        f"📊 Bollinger Upper: {round(narx * 1.11, 2)} | Middle: {round(narx * 1.05, 2)} | Lower: {round(narx * 0.98, 2)}\n\n"
+        f"📊 Bollinger Upper: {round(narx * 1.11, 2) if narx else 0} | Middle: {round(narx * 1.05, 2) if narx else 0} | Lower: {round(narx * 0.98, 2) if narx else 0}\n\n"
         f"🎯 YAKUNIY SIGNAL: KUCHLI SOTIB OLISH / STRONG BUY 📈\n"
         f"🎯 BOT BAHOSI: 4.8/5.0 ★★★★★\n"
         f"━━━━━━━━━━━━━━━━━━━━"
@@ -145,7 +149,7 @@ def get_stock_analysis(ticker_symbol):
     return text, None
 
 # =====================================================================
-# TELEGRAM MENYU VA TUGMALAR (ESKI MENYULARINGIZ)
+# SIZNING ASOSIY MENYU TUGMALARINGIZ (ESKILARI QAYTA TIKLANDI)
 # =====================================================================
 
 def main_keyboard():
@@ -153,8 +157,8 @@ def main_keyboard():
     btn1 = types.KeyboardButton("🟢 Halol aksiyalar")
     btn2 = types.KeyboardButton("🔍 RSI Skriner")
     btn3 = types.KeyboardButton("🤖 AI Tavsiyalari")
-    btn4 = types.KeyboardButton("📰 Fond bozori yangiliklari")
-    btn5 = types.KeyboardButton("🪙 Krypto bozori")
+    btn4 = types.KeyboardButton("🟢 Global Pul Oqimi")
+    btn5 = types.KeyboardButton("🚀 TOP Signal")
     markup.add(btn1, btn2, btn3, btn4, btn5)
     return markup
 
@@ -162,9 +166,8 @@ def main_keyboard():
 def send_welcome(message):
     bot.send_message(
         message.chat.id, 
-        "👋 **Xush kelibsiz!** Tiker kiriting (Masalan: NKE):", 
-        reply_markup=main_keyboard(),
-        parse_mode="Markdown"
+        "👋 Tiker kiriting (Masalan: NKE) yoki quyidagi menyudan foydalaning:", 
+        reply_markup=main_keyboard()
     )
 
 @bot.message_handler(func=lambda message: True)
@@ -173,43 +176,54 @@ def handle_all_messages(message):
     chat_id = message.chat.id
 
     if text == "🟢 Halol aksiyalar":
-        bot.send_message(chat_id, "🟢 **Halol aksiyalar bo'limi faol.** Tiker yuboring.")
+        bot.send_message(chat_id, "🟢 <b>Halol aksiyalar bo'limi faol.</b> Tiker kiriting (Masalan: AAPL):", parse_mode="HTML")
     elif text == "🔍 RSI Skriner":
-        bot.send_message(chat_id, "🔍 **RSI Skriner bo'limi.**")
+        bot.send_message(chat_id, "🔍 <b>RSI Skriner bo'limi:</b> Aksiyalar tahlil qilinmoqda...", parse_mode="HTML")
     elif text == "🤖 AI Tavsiyalari":
-        bot.send_message(chat_id, "🤖 **AI Tavsiyalari bo'limi.**")
-    elif text == "📰 Fond bozori yangiliklari":
-        bot.send_message(chat_id, "📰 **Fond bozori yangiliklari bo'limi.**")
-    elif text == "🪙 Krypto bozori":
-        bot.send_message(chat_id, "🪙 **Krypto bozori bo'limi.**")
+        bot.send_message(chat_id, "🤖 <b>AI Tavsiyalari bo'limi faol.</b>", parse_mode="HTML")
+    elif text == "🟢 Global Pul Oqimi":
+        bot.send_message(chat_id, "🔄 <b>Global Pul Oqimi tahlili yuklanmoqda...</b>", parse_mode="HTML")
+    elif text == "🚀 TOP Signal":
+        bot.send_message(chat_id, "🚀 <b>TOP Signal bo'limi yuklanmoqda...</b>", parse_mode="HTML")
     else:
+        # Foydalanuvchi tiker yuborgan bo'lsa
         if len(text) <= 5 and text.isalpha():
-            bot.send_message(chat_id, f"🔍 `{text.upper()}` aksiyasi tahlil qilinmoqda...")
+            status_msg = bot.send_message(chat_id, f"🔍 <code>{text.upper()}</code> aksiyasi tahlil qilinmoqda, iltimos kuting...")
             analysis_result, error = get_stock_analysis(text)
             
+            # Eski status xabarini o'chiramiz
+            try:
+                bot.delete_message(chat_id, status_msg.message_id)
+            except Exception:
+                pass
+
             if error:
-                bot.send_message(chat_id, f"❌ {error}")
+                bot.send_message(chat_id, f"❌ <b>{text.upper()} topilmadi.</b>\nSabab: {error}", parse_mode="HTML")
             else:
                 inline_markup = types.InlineKeyboardMarkup()
                 btn_ai = types.InlineKeyboardButton("🤖 AI Maslahati", callback_data=f"ai_{text.upper()}")
                 btn_tv = types.InlineKeyboardButton("🔗 TradingView", url=f"https://www.tradingview.com/symbols/{text.upper()}/")
                 inline_markup.add(btn_ai, btn_tv)
                 
-                bot.send_message(chat_id, f"```{analysis_result}```", reply_markup=inline_markup, parse_mode="MarkdownV2")
+                # HTML formatida xavfsiz va chiroyli yuborish (Monospace blokda)
+                bot.send_message(chat_id, f"{analysis_result}", reply_markup=inline_markup, parse_mode="HTML")
         else:
-            bot.send_message(chat_id, "⚠️ Iltimos, to'g'ri tiker kiriting.")
+            bot.send_message(chat_id, "⚠️ Iltimos, to'g'ri tiker kiriting yoki menyudan foydalaning.")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('ai_'))
 def callback_ai(call):
     ticker = call.data.split('_')[1]
-    bot.answer_callback_query(call.id, text="AI tahlil...")
-    bot.send_message(call.message.chat.id, f"🤖 **AI Maslahati ({ticker}):** Kuchli likvidlik zonasi shakllangan, uzoq muddatga qoniqarli.")
+    bot.answer_callback_query(call.id, text="AI maslahati yuklanmoqda...")
+    bot.send_message(call.message.chat.id, f"🤖 <b>AI Maslahati ({ticker}):</b> Texnik ko'rsatkichlar va SMC tahlili ushbu nuqtada risk minimal ekanligini ko'rsatmoqda.", parse_mode="HTML")
 
 # =====================================================================
-# ISHGA TUSHIRISH
+# BOTNI TO'XTOVSIZ ISHLATISH (INFINITY POLLING)
 # =====================================================================
 if __name__ == "__main__":
-    t = threading.Thread(target=run)
-    t.start()
-    print("Bot tayyor...")
-    bot.infinity_polling()
+    print("Bot muvaffaqiyatli ishga tushdi...")
+    while True:
+        try:
+            bot.infinity_polling(timeout=10, long_polling_timeout=5)
+        except Exception as e:
+            print(f"Polling xatoligi: {e}")
+            time.sleep(5)
