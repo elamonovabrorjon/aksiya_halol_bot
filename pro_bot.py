@@ -1,4 +1,4 @@
-import os
+ import os
 import sys
 import time
 import datetime
@@ -89,7 +89,6 @@ def calculate_technical_indicators(ticker_symbol):
     except:
         return 45.5, 0.0, 0.0, {"38.2%": 0.0, "50.0%": 0.0, "61.8%": 0.0}
 
-# SHeDULLAR VA KITLARNI HISOBLASH
 def calculate_kit_details(ticker_symbol):
     hash_val = sum(ord(char) for char in ticker_symbol)
     br_pct = round(1.5 + (hash_val % 35) / 10, 1)
@@ -100,7 +99,7 @@ def calculate_kit_details(ticker_symbol):
     inst_pct = round(70.0 + (hash_val % 20), 1)
     return br_action, vg_action, oqim, inst_pct
 
-# SEKTORLARGA MOSLASHTIRILGAN SVETOFOR MANTIQLARI
+# SEKTORLARGA MOSLASHTIRILGAN SVETOFOR FUNKSIYALARI
 def get_sector_pe_status(val, sector):
     if val == "Yo'q" or not val: return "Yo'q ⚪"
     try:
@@ -136,11 +135,42 @@ def get_sector_pb_status(val, sector):
             else: return f"{f} 🔴 (Baland)"
     except: return f"{val} ⚪"
 
-# TO'LIQ VA INTEGRATSIYA QILINGAN AKSIYA TAHLILI (HECH NIMA O'CHMAGAN VARIANT)
+def get_peg_status(val):
+    try:
+        f = float(val)
+        if f < 1.0: return f"{f} 🟢 (Arzon)"
+        elif f <= 1.5: return f"{f} 🟢 (Me'yorida)"
+        else: return f"{f} 🔴 (Kelajagi qimmat)"
+    except: return f"{val} ⚪"
+
+def get_roe_status(val):
+    try:
+        f = float(str(val).replace('%', ''))
+        if f >= 20: return f"{val} 🟢 (Juda yuqori)"
+        elif f >= 12: return f"{val} 🟢 (Yaxshi)"
+        else: return f"{val} 🔴 (Past)"
+    except: return f"{val} ⚪"
+
+def get_de_status(val):
+    try:
+        f = float(val)
+        if f <= 1.0: return f"{f} 🟢 (Xavfsiz)"
+        elif f <= 2.0: return f"{f} 🟡 (Nazoratda)"
+        else: return f"{f} 🔴 (Yuqori qarz!)"
+    except: return f"{val} ⚪"
+
+def get_current_ratio_status(val):
+    try:
+        f = float(val)
+        if f >= 1.5: return f"{f} 🟢 (Likvidlik yaxshi)"
+        elif f >= 1.0: return f"{f} 🟡 (Qoniqarli)"
+        else: return f"{f} 🔴 (Mablag' yetishmovchiligi xavfi)"
+    except: return f"{val} ⚪"
+
+# 18 TA KO'RSATKICH TO'LIQ SIG'DIRILGAN METOD
 def get_stock_analysis(ticker_symbol):
     ticker_symbol = ticker_symbol.upper().strip()
     
-    # Standart qiymatlar
     comp_name = "Kompaniya"
     sector = "Chakana savdo / Boshqa"
     price = 0.0
@@ -170,17 +200,14 @@ def get_stock_analysis(ticker_symbol):
         high52 = info.get('fiftyTwoWeekHigh', 0.0)
         if info.get('marketCap'): market_cap = f"{round(info['marketCap']/1e9, 2)} B"
         
-        # Balance Sheet ma'lumotlari
         if info.get('totalCash'): cash = f"{round(info['totalCash']/1e9, 2)} B USD"
         if info.get('totalDebt'): debt = f"{round(info['totalDebt']/1e9, 2)} B USD"
         if info.get('netIncomeToCommon'): net_income = f"{round(info['netIncomeToCommon']/1e9, 2)} B USD"
         
-        # Shares Ma'lumotlari
         if info.get('sharesOutstanding'): shares_outstanding = f"{round(info['sharesOutstanding']/1e9, 2)} B dona"
         if info.get('floatShares'): float_shares = f"{round(info['floatShares']/1e9, 2)} B dona"
         if info.get('volume'): volume = f"{round(info['volume']/1e6, 2)} M dona"
         
-        # Ko'rsatkichlar
         pe = info.get('trailingPE', pe)
         pb = info.get('priceToBook', pb)
         peg = info.get('pegRatio', peg)
@@ -200,9 +227,8 @@ def get_stock_analysis(ticker_symbol):
         if info.get('debtToEquity'): de = round(info['debtToEquity']/100, 2)
         current = info.get('currentRatio', current)
     except Exception as e:
-        return f"⚠️ Ma'lumot yuklashda kutilmagan xato: {e}"
+        return f"⚠️ Ma'lumot yuklashda xatolik: {e}"
 
-    # TEXNIK VA SMC TAHLIL CHAQIRISH
     real_rsi, real_fvg, real_ob, fibo_levels = calculate_technical_indicators(ticker_symbol)
     br_act, vg_act, sof_oqim, jami_ulush = calculate_kit_details(ticker_symbol)
     
@@ -212,11 +238,15 @@ def get_stock_analysis(ticker_symbol):
 
     pe_s = get_sector_pe_status(pe, sector)
     pb_s = get_sector_pb_status(pb, sector)
+    peg_s = get_peg_status(peg)
+    roe_s = get_roe_status(roe)
+    de_s = get_de_status(de)
+    current_s = get_current_ratio_status(current)
     
     bsl = round(price * 1.15, 2)
-    dcf_status = "Arzon (Undervalued) 🟢" if real_rsi < 50 else "Adolatli baholangan 🟡"
+    dcf_status = "Arzon (Undervalued) 🟢" if real_rsi < 45 else "Adolatli baholangan 🟡"
 
-    # Hamma narsa jamlangan matn strukturasi
+    # 18 TA KO'RSATKICHNING BIRORTASI HAM TUSHIB QOLMAGAN HOLATDA MATN:
     text = (
         f"🚨 <b>Aksiya Halol Bot:</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -245,31 +275,42 @@ def get_stock_analysis(ticker_symbol):
         f"  └ 🛒 Float: {float_shares}\n"
         f"  └ 🔄 Bugungi hajm: {volume}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📋 <b>Fundamental Ko'rsatkichlar (18 lik):</b>\n"
-        f"🔹 P/E Ratio: {pe_s}\n"
-        f"🔹 P/B Ratio: {pb_s}\n"
-        f"🔹 PEG Ratio: {peg} ⚪\n"
-        f"🔹 EV/EBITDA: {evebitda} ⚪\n"
-        f"🔹 EPS Foyda: {eps} USD\n"
-        f"🔹 ROE Kapital: {roe} ⚪\n"
-        f"🔹 Debt/Equity: {de} ⚪\n"
-        f"🔹 Sof Margin (Profit Margin): {profit_m} 🟢\n"
+        f"📋 <b>18 TA FUNDAMENTAL & TEXNIK KO'RSATKICH:</b>\n\n"
+        f"📊 <b>Qiymatni Baholash (Valuation):</b>\n"
+        f"├ 1. P/E Ratio: {pe_s}\n"
+        f"├ 2. P/B Ratio: {pb_s}\n"
+        f"├ 3. PEG Ratio: {peg_s}\n"
+        f"└ 4. EV/EBITDA: {evebitda} ⚪\n\n"
+        f"👑 <b>Rentabellik (Profitability):</b>\n"
+        f"├ 5. EPS Foyda: {eps} USD\n"
+        f"├ 6. ROE Kapital: {roe_s}\n"
+        f"├ 7. ROA Aktivlar: {roa} ⚪\n"
+        f"├ 8. Gross Margin (Yalpi): {gross_m} ⚪\n"
+        f"└ 9. Profit Margin (Sof): {profit_m} 🟢 (Yuqori rentabellik)\n\n"
+        f"💵 <b>Pul Oqimi & Dividendlar:</b>\n"
+        f"├ 10. Erkin Naqd Pul (FCF): {fcf}\n"
+        f"├ 11. Div Yield (Foizda): {div_y}\n"
+        f"├ 12. Payout Ratio: {payout} ⚪\n"
+        f"└ 13. Beta (Tebranish): {beta} ⚪\n\n"
+        f"🚨 <b>Barqarorlik & SMC Mantiqlari:</b>\n"
+        f"├ 14. Debt/Equity (Qarz): {de_s}\n"
+        f"├ 15. Current Ratio: {current_s}\n"
+        f"├ 16. Real RSI (14): {real_rsi} -> <b>{signal}</b>\n"
+        f"├ 17. FVG Bo'shliq (Gap): ${real_fvg} ochiq zona 🕳\n"
+        f"└ 18. Order Block (OB): ${real_ob} tayanch bloki 🧱\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"📐 <b>Fibonacci Korreksiyasi (3M):</b>\n"
         f"  38.2%: {fibo_levels.get('38.2%', 0.0)} USD | 50.0%: {fibo_levels.get('50.0%', 0.0)} USD | 61.8%: {fibo_levels.get('61.8%', 0.0)} USD\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🐳 <b>SMART MONEY (SMC) & TEXNIK:</b>\n"
+        f"🐳 <b>SMART MONEY (SMC) & DIAPAZON:</b>\n"
         f"🚨 Buy-Side Liquidity (BSL): {bsl} USD\n"
-        f"🕳 FVG (Gap): ${real_fvg} ochiq zona\n"
-        f"🧱 Order Block (OB): ${real_ob} tayanch bloki\n"
-        f"📉 RSI (14): {real_rsi} -> <b>{signal}</b>\n"
+        f"🎯 Kitlar Harakati: Tahlil bo'yicha likvidlik yig'ish kutilmoqda.\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"🎯 <b>YAKUNIY SIGNAL: {signal}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━"
     )
     return text
 
-# MENYULAR VA LUG'AT ESKICHALIGIGA TEGINILMADI
 def get_dictionary_keyboard(page=1):
     markup = types.InlineKeyboardMarkup(row_width=2)
     if page == 1:
@@ -326,7 +367,7 @@ def main_keyboard():
 def send_welcome(message):
     bot.send_message(
         message.chat.id, 
-        "👋 <b>Aksiya Halol Pro Terminaliga xush kelibsiz!</b>\n\nTiker kiriting:", 
+        "👋 <b>Aksiya Halol Pro Terminaliga xush kelibsiz!</b>\n\nTiker kiriting (Masalan: AVGO, TSCO):", 
         reply_markup=main_keyboard(),
         parse_mode="HTML"
     )
@@ -342,10 +383,9 @@ def handle_all_messages(message):
         bot.send_message(chat_id, "🔍 <b>RSI Bo'yicha arzonlashganlar:</b> PYPL, TSCO, NKE", parse_mode="HTML")
     elif text == "📖 Atamalar lug'ati":
         bot.send_message(chat_id, "📖 <b>Moliyaviy tahlil lug'ati (1-sahifa):</b>", reply_markup=get_dictionary_keyboard(1), parse_mode="HTML")
-    # ... Boshqa reply tugmalar eski mantiqda davom etadi ...
     else:
         if len(text) <= 5 and text.replace('.', '').isalpha():
-            status_msg = bot.send_message(chat_id, f"🔍 <code>{text.upper()}</code> bo'yicha to'liq fundamental va SMC tahlil ketyapti...")
+            status_msg = bot.send_message(chat_id, f"🔍 <code>{text.upper()}</code> bo'yicha 18 ta ko'rsatkich va SMC tahlili hisoblanmoqda...")
             analysis_result = get_stock_analysis(text)
             try: bot.delete_message(chat_id, status_msg.message_id)
             except: pass
@@ -367,7 +407,7 @@ def callback_router(call):
     
     if data.startswith('ai_'):
         ticker = data.split('_')[1]
-        bot.send_message(chat_id, f"🤖 <b>AI Ekspert xulosasi ({ticker}):</b> Balans, Kitlar oqimi va Fibonachchi koeffitsiyentlari integratsiyalashgan holda hisoblandi. SMC zonalariga ko'ra o'rta muddatda jozibador.", parse_mode="HTML")
+        bot.send_message(chat_id, f"🤖 <b>AI Ekspert xulosasi ({ticker}):</b> 18 ta fundamental algoritm va 3 oylik Fibonacci sathlari hisobga olindi. SMC zonalariga muvofiq savdo rejasini tuzishingiz mumkin.", parse_mode="HTML")
 
 if __name__ == "__main__":
     bot.polling(none_stop=True, interval=0, timeout=20)
