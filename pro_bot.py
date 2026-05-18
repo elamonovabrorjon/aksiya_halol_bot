@@ -24,10 +24,11 @@ def home():
 
 # ===================== SOZLAMALAR =====================
 TOKEN = os.getenv("BOT_TOKEN") or "8781183838:AAEcHw_5d0rDnLFmA07pGFO7y4Uh8ZRTeg8"
-RENDER_URL = 'https://aksiya-halol-bot3.onrender.com'  # O'zingizning Render URL manzilingiz
+RENDER_URL = 'https://aksiya-halol-bot3.onrender.com'
 ADMIN_ID = 5716183424
 
-bot = telebot.TeleBot(TOKEN)
+# bot.polling xatolik tufayli to'xtab qolmasligi uchun threaded=True qilamiz
+bot = telebot.TeleBot(TOKEN, threaded=True)
 
 user_modes = {}
 uz_user_modes = {}
@@ -107,7 +108,7 @@ def hisobla_bollinger(closes, period=20):
         return 0.0, 0.0, 0.0
 
 # ===================== AI XIZMATI (MISTRAL MODEL) =====================
-def ai_request(prompt: str, timeout: int = 5):
+def ai_request(prompt: str, timeout: int = 7):
     try:
         response = requests.post(
             "https://text.pollinations.ai/",
@@ -146,7 +147,7 @@ def get_ai_advice(ticker):
             f"Narx: {narx} USD, P/E: {pe_str}, RSI: {rsi}, Bollinger Upper: {upper}, Lower: {lower}, Shariat: {halal_status}. "
             f"Xolis fikr bering."
         )
-        result = ai_request(prompt, timeout=6)
+        result = ai_request(prompt, timeout=8)
         return result if result else "🤖 AI xizmati hozir band. Keyinroq qayta urinib ko'ring."
     except:
         return "🤖 AI xizmati hozir band. Keyinroq qayta urinib ko'ring."
@@ -155,7 +156,7 @@ def get_ai_advice(ticker):
 def uzbek_stock_price(symbol):
     try:
         url = "https://uzse.uz/quotes"
-        res = requests.get(url, timeout=10)
+        res = requests.get(url, timeout=5)
         soup = BeautifulSoup(res.text, "html.parser")
         rows = soup.find_all("tr")
         for row in rows:
@@ -173,7 +174,7 @@ def uzbekistan_stock_analysis(text_input: str):
     symbol = text_input.strip().upper()
     uz_price = uzbek_stock_price(symbol)
     
-    price_str = f"<b>{uz_price:,.2f} UZS</b>" if uz_price else "🔄 Saytdan joriy narx yuklanmadi (tahlil fundamental)"
+    price_str = f"<b>{uz_price:,.2f} UZS</b>" if uz_price else "🔄 Birja narxi vaqtincha yuklanmadi"
     
     prompt = (
         f"Siz Toshkent Respublika Fond Birjasi (UZSE) bo'yicha professional moliya expertisiz.\n"
@@ -188,13 +189,13 @@ def uzbekistan_stock_analysis(text_input: str):
     res = ai_request(prompt, timeout=8)
     if res:
         return f"━━━━━━━━━━━━━━━━━━━━\n🇺🇿 <b>TOSHKENT RFB TAHLILI ({symbol})</b>\n━━━━━━━━━━━━━━━━━━━━\n💰 Birja narxi: {price_str}\n\n{res}\n━━━━━━━━━━━━━━━━━━━━"
-    return f"❌ Tahlilda xatolik. Birja narxi: {price_str}"
+    return f"❌ Tahlilda vaqtinchalik xatolik. Birja narxi: {price_str}"
 
-# ===================== YANGILIKLAR =====================
+# ===================== YANGILIKLAR (TUZATILDI) =====================
 def get_market_news():
     try:
         url = "https://news.google.com/rss/search?q=stock+market+investing+news&hl=en-US&gl=US&ceid=US:en"
-        res = requests.get(url, timeout=5)
+        res = requests.get(url, timeout=6)
         import xml.etree.ElementTree as ET
         root = ET.fromstring(res.content)
         news_list = []
@@ -207,27 +208,35 @@ def get_market_news():
             return "❌ Hozircha yangiliklar topilmadi."
         combined = "\n\n".join([f"- {t}" for t in news_list])
         prompt = f"Quyidagi yangiliklar sarlavhalarini o'zbek tiliga lo'nda tarjima qiling:\n\n{combined}"
-        uz_news = ai_request(prompt, timeout=6)
-        return uz_news if uz_news else combined + "\n\n⚠️ <i>(AI bandligi sababli vaqtincha inglizcha tilda ko'rsatildi)</i>"
+        uz_news = ai_request(prompt, timeout=7)
+        return uz_news if uz_news else combined + "\n\n⚠️ <i>(Tarjimon xizmati bandligi sababli inglizcha ko'rsatildi)</i>"
     except:
-        return "🌐 Yangiliklar yuklanmadi. Birozdan so'ng qayta urinib ko'ring."
+        return "🌐 Global yangiliklar serveri band. Birozdan so'ng qayta urinib ko'ring."
 
-# ===================== KRIPTO BOZORI =====================
+# ===================== KRIPTO BOZORI (TUZATILDI - CHALA MATN QOLMAYDI) =====================
 def get_crypto_market_summary():
     cryptos = {"BTC-USD": "Bitcoin (BTC)", "ETH-USD": "Ethereum (ETH)", "BNB-USD": "BNB", "SOL-USD": "Solana (SOL)", "XRP-USD": "Ripple (XRP)"}
     matn = "━━━━━━━━━━━━━━━━━━━━\n🪙 <b>JORIY KRIPTO BOZORI</b>\n━━━━━━━━━━━━━━━━━━━━\n"
+    has_data = False
     for ticker, name in cryptos.items():
         try:
             coin = yf.Ticker(ticker)
             hist = coin.history(period="2d")
-            if len(hist) >= 2:
+            if hist is not None and len(hist) >= 2:
                 narx = hist['Close'].iloc[-1]
                 old_narx = hist['Close'].iloc[-2]
                 ozgarish = ((narx - old_narx) / old_narx) * 100
                 belgi = "📈" if ozgarish >= 0 else "📉"
                 matn += f"{belgi} <b>{name}</b>\n  └ {narx:,.2f} USD | {ozgarish:+.2f}%\n\n"
+                has_data = True
+            else:
+                matn += f"❌ <b>{name}</b>: Ma'lumot yo'q\n\n"
         except:
             matn += f"❌ <b>{name}</b> yuklanmadi.\n\n"
+    
+    if not has_data:
+        return "❌ Kripto bozorini yuklashda Yahoo Finance xatoligi berdi. Qayta urinib ko'ring."
+        
     return matn + "━━━━━━━━━━━━━━━━━━━━"
 
 # ===================== BOZOR YETAKCHILARI =====================
@@ -284,7 +293,6 @@ def aksiya_tahlil(tiker: str):
         if tiker_clean in ["BTC", "ETH", "BNB", "SOL", "XRP"]:
             tiker_clean += "-USD"
 
-        # Agar o'zbek aksiyasi bo'lsa jonli narx tekshiriladi
         uz_price = uzbek_stock_price(tiker_clean)
         if uz_price:
             return uzbekistan_stock_analysis(tiker_clean), None, None
@@ -330,7 +338,6 @@ def aksiya_tahlil(tiker: str):
         rsi, rsi_signal = hisobla_rsi(closes)
         upper, middle, lower = hisobla_bollinger(closes)
 
-        # Signal Strategiyasi (RSI + Bollinger Bands)
         signal = "HOLD ↕️"
         if rsi <= 30 and narx < lower: signal = "STRONG BUY 🚀"
         elif rsi <= 40: signal = "BUY 🛒"
@@ -487,7 +494,6 @@ def handle_messages(message):
                 except: bot.send_message(uid, javob, parse_mode="HTML", reply_markup=inline_action(tiker_clean))
             time.sleep(0.5)
 
-    # 🧠 INTERAKTIV KUNLIK TEST (QUIZ) FUNKSIYASI
     elif text == "🧠 Kunlik Test":
         bot.send_chat_action(uid, 'typing')
         quiz_prompt = (
@@ -596,14 +602,23 @@ def run_web():
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
+def run_bot_polling():
+    while True:
+        try:
+            print("Bot polling boshlandi...")
+            bot.polling(none_stop=True, interval=0, timeout=20)
+        except Exception as e:
+            print(f"Polling ichki xatosi: {e}")
+            time.sleep(5)  # Crash bo'lsa 5 soniya kutib qayta urunadi
+
 if __name__ == "__main__":
-    print("Bot ishga tushmoqda...")
+    # Render uchun Webhook o'rniga polling rejimini xavfsiz Threadda ochamiz
     try:
         bot.remove_webhook()
         time.sleep(1)
-        bot.set_webhook(url=f"{RENDER_URL}/{TOKEN}")
-        print(f"Webhook o'rnatildi: {RENDER_URL}")
-    except Exception as e: print(f"Webhook xatosi: {e}")
+    except:
+        pass
 
-    # Render uchun Flask va Bot parallel xavfsiz ishga tushiriladi
-    threading.Thread(target=run_web).start()
+    # Bot va Veb-server bir-birini to'sib qo'ymasligi uchun alohida oqimlarda ishlaydi
+    threading.Thread(target=run_bot_polling, daemon=True).start()
+    run_web()
