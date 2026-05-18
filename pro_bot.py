@@ -42,20 +42,28 @@ try:
 except:
     pass
 
-# ICHKI KESH TIZIMI (requests_cache kutubxonasiz ishlaydi)
+# GLOBAL SESSYA VA USER-AGENT (Yahoo blokini aylanib o'tish uchun)
+session = requests.Session()
+session.headers.update({
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.5',
+    'Connection': 'keep-alive'
+})
+
+# ICHKI KESH TIZIMI (5 daqiqa davomida ma'lumotni saqlaydi va blokdan himoya qiladi)
 INTERNAL_CACHE = {}
-CACHE_EXPIRE_SEC = 300  # 5 daqiqa
+CACHE_EXPIRE_SEC = 300
 
 def get_cached_ticker_info(ticker_symbol):
     current_time = time.time()
-    # Agar keshda bo'lsa va muddati o'tmagan bo'lsa, keshdan berish
     if ticker_symbol in INTERNAL_CACHE:
         cache_data, cache_time = INTERNAL_CACHE[ticker_symbol]
         if current_time - cache_time < CACHE_EXPIRE_SEC:
             return cache_data
             
-    # Aks holda yangi ma'lumot yuklash
-    ticker = yf.Ticker(ticker_symbol)
+    # Yangi so'rov sarlavhalari bilan yuklash
+    ticker = yf.Ticker(ticker_symbol, session=session)
     info = ticker.info
     INTERNAL_CACHE[ticker_symbol] = (info, current_time)
     return info
@@ -63,7 +71,7 @@ def get_cached_ticker_info(ticker_symbol):
 # REAL TEXNIK INDIKATORLAR VA FIBONACCHINI HISOBLASH
 def calculate_technical_indicators(ticker_symbol):
     try:
-        ticker = yf.Ticker(ticker_symbol)
+        ticker = yf.Ticker(ticker_symbol, session=session)
         hist = ticker.history(period="3mo", interval="1d")
         if hist.empty or len(hist) < 15:
             return 45.5, 0.0, 0.0, {}
@@ -203,7 +211,7 @@ def get_live_crypto_prices():
     text = "🪙 <b>Jonli Kripto Bozori Kurslari:</b>\n━━━━━━━━━━━━━━━━━━━━\n"
     for ticker, name in cryptos.items():
         try:
-            t = yf.Ticker(ticker)
+            t = yf.Ticker(ticker, session=session)
             price = t.info.get('regularMarketPrice', t.info.get('currentPrice', 0.0))
             change = t.info.get('regularMarketChangePercent', 0.0)
             icon = "📈 🟢" if change >= 0 else "📉 🔴"
@@ -219,7 +227,7 @@ def get_live_market_leaders():
     text = "🔥 <b>Bozor Yetakchilari (Top Aksiyalar):</b>\n━━━━━━━━━━━━━━━━━━━━\n"
     for ticker, name in leaders.items():
         try:
-            t = yf.Ticker(ticker)
+            t = yf.Ticker(ticker, session=session)
             price = t.info.get('currentPrice', t.info.get('regularMarketPrice', 0.0))
             change = t.info.get('regularMarketChangePercent', 0.0)
             icon = "🟢" if change >= 0 else "🔴"
@@ -292,7 +300,7 @@ def get_stock_analysis(ticker_symbol):
         if info.get('debtToEquity'): de = round(info['debtToEquity']/100, 2)
         current = info.get('currentRatio', current)
     except Exception as e:
-        return f"⚠️ Ma'lumot yuklashda xatolik yuz berdi. Iltimos qaytadan urunib ko'ring."
+        return f"⚠️ Ma'lumot yuklashda vaqt tugadi. Iltimos qaytadan urunib ko'ring."
 
     real_rsi, real_fvg, real_ob, fibo_levels = calculate_technical_indicators(ticker_symbol)
     br_act, vg_act, sof_oqim, jami_ulush = calculate_kit_details(ticker_symbol)
