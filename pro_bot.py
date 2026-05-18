@@ -242,6 +242,65 @@ def main_menu():
     kb.add(types.KeyboardButton("📰 Yangiliklar"), types.KeyboardButton("🪙 Kripto"))
     kb.add(types.KeyboardButton("🔥 Yetakchilar"), types.KeyboardButton("📖 Lug'at"))
     return kb
+    # =====================================================================
+# 4. TELEGRAM MENYU VA TUGMALARI (Kun savoli bo'limi qo'shildi)
+# =====================================================================
+
+def main_keyboard():
+    markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
+    btn1 = types.KeyboardButton("🟢 Halol aksiyalar")
+    btn2 = types.KeyboardButton("🔍 RSI Skriner")
+    btn3 = types.KeyboardButton("🤖 AI Tavsiyalari")
+    btn4 = types.KeyboardButton("🟢 Global Pul Oqimi")
+    btn5 = types.KeyboardButton("🚀 TOP Signal")
+    btn6 = types.KeyboardButton("❓ Kun savoli")  # <-- Yangi qo'shilgan tugma
+    markup.add(btn1, btn2, btn3, btn4, btn5, btn6)
+    return markup
+
+@bot.message_handler(func=lambda message: True)
+def handle_all_messages(message):
+    text = message.text
+    chat_id = message.chat.id
+
+    if text == "🟢 Halol aksiyalar":
+        bot.send_message(chat_id, "🟢 <b>Halol aksiyalar bo'limi faol.</b> Tiker kiriting (Masalan: AAPL):", parse_mode="HTML")
+    elif text == "🔍 RSI Skriner":
+        bot.send_message(chat_id, "🔍 <b>RSI Skriner bo'limi:</b> Aksiyalar tahlil qilinmoqda...", parse_mode="HTML")
+    elif text == "🤖 AI Tavsiyalari":
+        bot.send_message(chat_id, "🤖 <b>AI Tavsiyalari bo'limi faol.</b>", parse_mode="HTML")
+    elif text == "🟢 Global Pul Oqimi":
+        bot.send_message(chat_id, "🔄 <b>Global Pul Oqimi tahlili yuklanmoqda...</b>", parse_mode="HTML")
+    elif text == "🚀 TOP Signal":
+        bot.send_message(chat_id, "🚀 <b>TOP Signal bo'limi yuklanmoqda...</b>", parse_mode="HTML")
+    elif text == "❓ Kun savoli":
+        # <-- Kun savoli bosilganda foydalanuvchiga keladigan javob
+        bot.send_message(
+            chat_id, 
+            "❓ <b>Kun savoli bo'limi:</b>\n\nBugungi bozor holati bo'yicha savollaringizni yozib qoldiring. Tez orada javob beriladi!", 
+            parse_mode="HTML"
+        )
+    else:
+        # Tiker tahlili qismi (O'z holatida qoladi)
+        if len(text) <= 5 and text.isalpha():
+            status_msg = bot.send_message(chat_id, f"🔍 <code>{text.upper()}</code> tahlil qilinmoqda...")
+            analysis_result, error = get_stock_analysis(text)
+            
+            try:
+                bot.delete_message(chat_id, status_msg.message_id)
+            except:
+                pass
+
+            if error:
+                bot.send_message(chat_id, f"❌ Xato: {error}")
+            else:
+                inline_markup = types.InlineKeyboardMarkup()
+                inline_markup.add(
+                    types.InlineKeyboardButton("🤖 AI Maslahati", callback_data=f"ai_{text.upper()}"),
+                    types.InlineKeyboardButton("🔗 TradingView", url=f"https://www.tradingview.com/symbols/{text.upper()}/")
+                )
+                bot.send_message(chat_id, analysis_result, reply_markup=inline_markup, parse_mode="HTML")
+        else:
+            bot.send_message(chat_id, "⚠️ Iltimos, to'g'ri tiker kiriting yoki menyudan foydalaning.")
 
 def exit_menu():
     kb = types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True)
