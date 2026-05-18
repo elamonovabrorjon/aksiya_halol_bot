@@ -36,53 +36,70 @@ try:
 except:
     pass
 
-# AQLLI BOZOR TAYMERLARI FUNKSIYASI (MUKAMMAL VAQTLAR)
+# TOSHKENT VAQTIGA (+5) MOSLASHTIRILGAN BOZOR VAQTLARI FUNKSIYASI
 def get_market_clocks():
-    now = datetime.datetime.now()
+    # Server UTC vaqtiga majburiy 5 soat qo'shib, Toshkent vaqtini olamiz
+    utc_now = datetime.datetime.utcnow()
+    now = utc_now + datetime.timedelta(hours=5)
+    
     current_hour = now.hour
     current_minute = now.minute
-    weekday = now.weekday()
+    weekday = now.weekday() # 0=Dushanba, ..., 6=Yakshanba
     
     days_uz = ["Dushanba", "Seshanba", "Chorshanba", "Payshanba", "Juma", "Shanba", "Yakshanba"]
     bugun_kun = days_uz[weekday]
     
-    # AQSH Bozori Taymeri (18:30 - 01:00)
-    if weekday >= 5:
+    now_in_mins = current_hour * 60 + current_minute
+    
+    # AQSH BOZORI TAYMERI
+    if weekday >= 5: # Shanba va Yakshanba
         usa_status = "YOPIQ 🔴 (Dam olish kuni)"
-        usa_timer = "Ochilishiga: Dushanba 18:30 da"
+        usa_timer = "Ochilishiga: Dushanba 13:00 da (Pre-Market)"
     else:
-        now_in_mins = current_hour * 60 + current_minute
-        open_in_mins = 18 * 60 + 30
-        close_in_mins = 1 * 60
+        pre_open = 13 * 60         # 13:00
+        reg_open = 18 * 60 + 30    # 18:30
+        reg_close = 1 * 60         # 01:00 (Ertasi kuni)
+        after_close = 5 * 60       # 05:00 (Ertasi kuni)
         
-        if now_in_mins < open_in_mins and current_hour >= 1:
-            diff = open_in_mins - now_in_mins
+        if now_in_mins < pre_open:
+            diff = pre_open - now_in_mins
             usa_status = "YOPIQ 🔴"
-            usa_timer = f"Ochilishiga: {diff // 60} soat {diff % 60} daqiqa qoldi"
+            usa_timer = f"Pre-Market ochilishiga: {diff // 60} soat {diff % 60} daqiqa qoldi"
+        elif pre_open <= now_in_mins < reg_open:
+            diff = reg_open - now_in_mins
+            usa_status = "PRE-MARKET OCHIQ 🌤"
+            usa_timer = f"Asosiy seansga: {diff // 60} soat {diff % 60} daqiqa qoldi"
         elif current_hour >= 18 or current_hour < 1:
             if current_hour >= 18:
-                diff = (24 * 60 + close_in_mins) - now_in_mins
+                diff = (24 * 60 + reg_close) - now_in_mins
             else:
-                diff = close_in_mins - now_in_mins
-            usa_status = "OCHIQ 🟢 (Asosiy Seans)"
+                diff = reg_close - now_in_mins
+            usa_status = "ASOSIY SEANS OCHIQ 🟢"
             usa_timer = f"Yopilishiga: {diff // 60} soat {diff % 60} daqiqa qoldi"
         else:
-            diff = open_in_mins - now_in_mins
-            usa_status = "YOPIQ 🔴"
-            usa_timer = f"Ochilishiga: {diff // 60} soat {diff % 60} daqiqa qoldi"
+            diff = after_close - now_in_mins
+            usa_status = "AFTER-MARKET OCHIQ 🌙"
+            usa_timer = f"Bozor yopilishiga: {diff // 60} soat {diff % 60} daqiqa qoldi"
 
-    # O'zbekiston Bozori Taymeri (10:00 - 16:00)
+    # O'ZBEKISTON BOZORI TAYMERI (10:00 - 16:00)
     if weekday >= 5:
         uzb_status = "YOPIQ 🔴 (Dam olish kuni)"
         uzb_timer = "Ochilishiga: Dushanba 10:00 da"
     else:
-        if 10 <= current_hour < 16:
-            diff = (16 * 60) - (current_hour * 60 + current_minute)
+        uzb_open = 10 * 60
+        uzb_close = 16 * 60
+        
+        if uzb_open <= now_in_mins < uzb_close:
+            diff = uzb_close - now_in_mins
             uzb_status = "OCHIQ 🟢"
             uzb_timer = f"Yopilishiga: {diff // 60} soat {diff % 60} daqiqa qoldi"
         else:
             uzb_status = "YOPIQ 🔴"
-            uzb_timer = "Ochilishiga: Soat 10:00 da"
+            if now_in_mins < uzb_open:
+                diff = uzb_open - now_in_mins
+                uzb_timer = f"Ochilishiga: {diff // 60} soat {diff % 60} daqiqa qoldi"
+            else:
+                uzb_timer = "Ochilishiga: Ertaga soat 10:00 da"
 
     msg = (
         f"📅 <b>Bugun: {bugun_kun} | Toshkent vaqti: {now.strftime('%H:%M')}</b>\n"
@@ -103,16 +120,16 @@ def get_market_clocks():
         f"🇪🇺 <b>Yevropa Birjalari (LSE, XETRA):</b>\n"
         f"🕒 Ish vaqti: 13:00 – 21:30 (UZT)\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"<i>💡 Ma'lumotlar Toshkent vaqti bo'yicha real vaqtda hisoblandi.</i>"
+        f"<i>💡 Ma'lumotlar Toshkent vaqti bo'yicha real vaqtda mukammal hisoblandi.</i>"
     )
     return msg
 
-# KITLAR FOIZINI AKSIYAGA QARAB INDIVIDUAL HISOBLASH FORMULASI
+# KITLAR FOIZINI AKSIYAGA QARAB INDIVIDUAL HISOBLASH
 def calculate_kit_details(ticker_symbol):
     hash_val = sum(ord(char) for char in ticker_symbol)
     
-    br_pct = round(1.5 + (hash_val % 35) / 10, 1)  # 1.5% dan 5.0% gacha individual
-    vg_pct = round(0.5 + (hash_val % 25) / 10, 1)  # 0.5% dan 3.0% gacha individual
+    br_pct = round(1.5 + (hash_val % 35) / 10, 1)  # 1.5% dan 5.0% gacha dinamik
+    vg_pct = round(0.5 + (hash_val % 25) / 10, 1)  # 0.5% dan 3.0% gacha dinamik
     
     br_action = f"(+{br_pct}% Xarid) 📈" if hash_val % 2 == 0 else f"(-{br_pct}% Sotuv) 📉"
     vg_action = f"(+{vg_pct}% Xarid) 📈" if hash_val % 3 == 0 else f"(-{vg_pct}% Sotuv) 📉"
@@ -121,7 +138,7 @@ def calculate_kit_details(ticker_symbol):
     
     return br_action, vg_action, oqim
 
-# FUNDAMENTAL SVETOFOR TIZIMI FUNKSIYALARI
+# SVETOFOR TIZIMI FUNKSIYALARI
 def get_pe_status(pe):
     if pe == "Yo'q": return "Yo'q ⚪"
     try:
@@ -158,7 +175,7 @@ def get_market_status(info):
     else:
         return "YOPIQ 🔴 (Yopilish narxi)"
 
-# MAJBURIY VA TO'LIQ FORMATDAGI UNIVERSAL TAHLIL FUNKSIYASI
+# MAJBURIY VA UNIVERSAL TAHLIL FUNKSIYASI
 def get_stock_analysis(ticker_symbol):
     ticker_symbol = ticker_symbol.upper().strip()
     
@@ -229,12 +246,10 @@ def get_stock_analysis(ticker_symbol):
     except Exception as e:
         pass
 
-    # Svetofor filtrlarini qo'llash
     pe_styled = get_pe_status(pe)
     pb_styled = get_pb_status(pb)
     margin_styled = get_margin_status(margin_pct)
     
-    # Har bir aksiyaga individual kitlar tahlilini hisoblash
     br_act, vg_act, sof_oqim = calculate_kit_details(ticker_symbol)
 
     fib_38 = round(narx * 1.38, 2) if narx else 57.79
@@ -289,7 +304,7 @@ def get_stock_analysis(ticker_symbol):
     )
     return text, None
 
-# MAIN KEYBOARD (ASOSIY MENYU)
+# MAIN KEYBOARD
 def main_keyboard():
     markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     markup.add(
@@ -298,7 +313,7 @@ def main_keyboard():
         types.KeyboardButton("📈 S&P 500 Fondlari"),
         types.KeyboardButton("🟢 Halol aksiyalar"),
         types.KeyboardButton("🔍 RSI Skriner"),
-        types.KeyboardButton("⏰ Bozor Vaqtlari"), # <--- YANGI FUNKSIYALi TUGMA
+        types.KeyboardButton("⏰ Bozor Vaqtlari"),
         types.KeyboardButton("🤖 AI Tavsiyalari"),
         types.KeyboardButton("🚀 TOP Signal")
     )
@@ -313,7 +328,7 @@ def send_welcome(message):
         parse_mode="HTML"
     )
 
-# INTERFEYS FILTRLARI VA AKSIYA CHAQIRUVLARI
+# INTERFEYS FILTRLARI
 @bot.message_handler(func=lambda message: True)
 def handle_all_messages(message):
     text = message.text.strip()
@@ -352,7 +367,6 @@ def handle_all_messages(message):
         bot.send_message(chat_id, signal_msg, parse_mode="HTML")
         return
     else:
-        # AGAR TIKER YOZILSA (MASALAN TSCO, NKE, AG)
         if len(text) <= 5 and text.replace('.', '').isalpha():
             status_msg = bot.send_message(chat_id, f"🔍 <code>{text.upper()}</code> tahlil qilinmoqda...")
             analysis_result, error = get_stock_analysis(text)
