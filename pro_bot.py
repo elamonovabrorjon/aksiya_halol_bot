@@ -10,9 +10,8 @@ import yfinance as yf
 import pandas as pd
 from flask import Flask
 import requests
-import requests_cache
 
-# MULTIPROCESSING XAVFSIZLIGI (Render-da Status 1 xatosini yo'qotadi)
+# MULTIPROCESSING XAVFSIZLIGI (Status 1 xatosini yo'qotadi)
 multiprocessing.freeze_support()
 
 # 1. RENDER SERVER REJIMI
@@ -43,16 +42,28 @@ try:
 except:
     pass
 
-# YAHOO FINANCE UCHUN SESSYA VA KESHNI SOZLASH (Too Many Requests himoyasi)
-session = requests_cache.CachedSession('yfinance_cache', expire_after=300)
-session.headers.update({
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-})
+# ICHKI KESH TIZIMI (requests_cache kutubxonasiz ishlaydi)
+INTERNAL_CACHE = {}
+CACHE_EXPIRE_SEC = 300  # 5 daqiqa
+
+def get_cached_ticker_info(ticker_symbol):
+    current_time = time.time()
+    # Agar keshda bo'lsa va muddati o'tmagan bo'lsa, keshdan berish
+    if ticker_symbol in INTERNAL_CACHE:
+        cache_data, cache_time = INTERNAL_CACHE[ticker_symbol]
+        if current_time - cache_time < CACHE_EXPIRE_SEC:
+            return cache_data
+            
+    # Aks holda yangi ma'lumot yuklash
+    ticker = yf.Ticker(ticker_symbol)
+    info = ticker.info
+    INTERNAL_CACHE[ticker_symbol] = (info, current_time)
+    return info
 
 # REAL TEXNIK INDIKATORLAR VA FIBONACCHINI HISOBLASH
 def calculate_technical_indicators(ticker_symbol):
     try:
-        ticker = yf.Ticker(ticker_symbol, session=session)
+        ticker = yf.Ticker(ticker_symbol)
         hist = ticker.history(period="3mo", interval="1d")
         if hist.empty or len(hist) < 15:
             return 45.5, 0.0, 0.0, {}
@@ -192,7 +203,7 @@ def get_live_crypto_prices():
     text = "🪙 <b>Jonli Kripto Bozori Kurslari:</b>\n━━━━━━━━━━━━━━━━━━━━\n"
     for ticker, name in cryptos.items():
         try:
-            t = yf.Ticker(ticker, session=session)
+            t = yf.Ticker(ticker)
             price = t.info.get('regularMarketPrice', t.info.get('currentPrice', 0.0))
             change = t.info.get('regularMarketChangePercent', 0.0)
             icon = "📈 🟢" if change >= 0 else "📉 🔴"
@@ -208,7 +219,7 @@ def get_live_market_leaders():
     text = "🔥 <b>Bozor Yetakchilari (Top Aksiyalar):</b>\n━━━━━━━━━━━━━━━━━━━━\n"
     for ticker, name in leaders.items():
         try:
-            t = yf.Ticker(ticker, session=session)
+            t = yf.Ticker(ticker)
             price = t.info.get('currentPrice', t.info.get('regularMarketPrice', 0.0))
             change = t.info.get('regularMarketChangePercent', 0.0)
             icon = "🟢" if change >= 0 else "🔴"
@@ -239,8 +250,7 @@ def get_stock_analysis(ticker_symbol):
     de, current = "Yo'q", "Yo'q"
 
     try:
-        ticker = yf.Ticker(ticker_symbol, session=session)
-        info = ticker.info
+        info = get_cached_ticker_info(ticker_symbol)
         if not info or 'longName' not in info:
             return f"⚠️ <b>{ticker_symbol}</b> tikeriga oid real ma'lumot topilmadi."
         
@@ -282,7 +292,7 @@ def get_stock_analysis(ticker_symbol):
         if info.get('debtToEquity'): de = round(info['debtToEquity']/100, 2)
         current = info.get('currentRatio', current)
     except Exception as e:
-        return f"⚠️ Ma'lumot yuklashda xatolik: Too Many Requests. Rate limited. Iltimos 1-2 daqiqa kutib qayta urining."
+        return f"⚠️ Ma'lumot yuklashda xatolik yuz berdi. Iltimos qaytadan urunib ko'ring."
 
     real_rsi, real_fvg, real_ob, fibo_levels = calculate_technical_indicators(ticker_symbol)
     br_act, vg_act, sof_oqim, jami_ulush = calculate_kit_details(ticker_symbol)
@@ -465,8 +475,6 @@ def handle_all_messages(message):
         bot.send_message(chat_id, "🐋 <b>Yirik Kitlar Monitoringi:</b>\n\nOxirgi chorak 13F hisobotlariga ko'ra BlackRock va Vanguard pozitsiyalarini yangiladi.\n\n💡 <i>Istalgan tikerizni yuborsangiz, kitlar ulushini jonli hisoblab beraman!</i>", parse_mode="HTML")
     elif text == "📖 Atamalar lug'ati":
         bot.send_message(chat_id, "📖 <b>Moliyaviy tahlil lug'ati (1-sahifa):</b>", reply_markup=get_dictionary_keyboard(1), parse_mode="HTML")
-    
-    # 13. BOZOR VAQTLARI
     elif text == "🕒 Bozor vaqtlari":
         bozor_text = (
             "🕒 <b>Global va Mahalliy Bozor Seanslari (Toshkent vaqti bilan):</b>\n"
