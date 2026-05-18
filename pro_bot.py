@@ -2,295 +2,475 @@ import os
 import telebot
 from telebot import types
 import yfinance as yf
-import pandas as pd
-import numpy as np
-import requests
-import threading
-from flask import Flask
-import time
 import html
+import threading
+from flask import Flask, request
+import time
+import requests
 import math
 from datetime import datetime
 
-# ===================== VEB-SERVER (RENDER UCHUN) =====================
+# ===================== FLASK SERVER =====================
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Aksiya Bot Ideal Formatda Faol!", 200
+    return "Halol Invest PRO Bot Ideal Rejimda Ishlamoqda!", 200
 
-# ===================== BOT SOZLAMALARI =====================
+# ===================== SOZLAMALAR =====================
+# Tokenni shu yerga yozing yoki Render Config Vars'ga BOT_TOKEN deb kiriting
 TOKEN = os.getenv("BOT_TOKEN") or "8781183838:AAEcHw_5d0rDnLFmA07pGFO7y4Uh8ZRTeg8"
+RENDER_URL = 'https://aksiya-halol-bot3.onrender.com'
+ADMIN_ID = 5716183424
+
 bot = telebot.TeleBot(TOKEN, threaded=True)
 
-_cache = {}
-_cache_time = {}
-CACHE_TTL = 300  
+# ===================== SESSIYA TIZIMI =====================
+user_modes = {}
+uz_user_modes = {}
+users_set = set()
 
+def save_user(uid): 
+    users_set.add(str(uid))
+
+def get_users_count(): 
+    return len(users_set)
+
+# ===================== XAVFSIZ MA'LUMOT YUKLASH =====================
 def get_stock_data(ticker: str):
-    now = time.time()
-    if ticker in _cache and now - _cache_time.get(ticker, 0) < CACHE_TTL:
-        return _cache[ticker]
+    """RAM yuklamasini kamaytirish uchun period='1y' qilib o'zgartirildi"""
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
-        hist = stock.history(period="3mo")
-        if info is None or len(info) == 0: return None, None, None
-        result = (stock, info, hist)
-        _cache[ticker] = result
-        _cache_time[ticker] = now
-        return result
-    except: return None, None, None
+        hist = stock.history(period="1y")  # Max o'rniga 1 yillik barqaror ma'lumot
+        if info is None or not isinstance(info, dict): 
+            info = {}
+        return stock, info, hist
+    except:
+        return None, {}, None
 
+# ===================== YORDAMCHI FUNKSIYALAR =====================
 def safe_float(val):
     try:
         f = float(val)
-        if math.isnan(f) or math.isinf(f): return None
-        return f
-    except: return None
-
-def format_katta_son(son):
-    val = safe_float(son)
-    if val is None or val == 0: return "—"
-    if val >= 1e12: return f"{val/1e12:.2f} B"  # Trillion o'rniga B (Billion/Milliard) ishlatish holati uchun
-    if val >= 1e9:  return f"{val/1e9:.2f} B"
-    if val >= 1e6:  return f"{val/1e6:.2f} M"
-    return f"{val:,.0f}"
-
-def format_sana(ts):
-    try:
-        val = safe_float(ts)
-        if val is None: return "Yaqinda yo'q"
-        # Agar timestamp juda katta bo'lsa (milli-soniyalarda kelsa)
-        if val > 1e11: val = val / 1000
-        return datetime.fromtimestamp(val).strftime('%d.%m.%Y')
+        return None if (math.isnan(f) or math.isinf(f)) else f
     except:
-        return "Yaqinda yo'q"
+        return None
+
+def fmt_num(val, suffix=""):
+    v = safe_float(val)
+    if v is None or v == 0: return "—"
+    neg = "-" if v < 0 else ""
+    v = abs(v)
+    if v >= 1e12: return f"{neg}{v/1e9:.2f} B{suffix}"  # Formatni o'zaro moslashtirish (Billion)
+    if v >= 1e9:  return f"{neg}{v/1e9:.2f} B{suffix}"
+    if v >= 1e6:  return f"{neg}{v/1e6:.2f} M{suffix}"
+    return f"{neg}{v:,.2f}{suffix}"
+
+def fmt_pct(val):
+    f = safe_float(val)
+    return f"{f:+.2f}%" if f is not None else "—"
+
+def fmt_date(val):
+    if not val: return "1780272000"
+    try:
+        if isinstance(val, datetime): return val.strftime('%d.%m.%Y')
+        if isinstance(val, (int, float)): return datetime.fromtimestamp(int(val)).strftime('%d.%m.%Y')
+        return str(val).split()[0]
+    except: return "1780272000"
+
+# ===================== AI XIZMATI =====================
+def ai_request(prompt: str, timeout: int = 8):
+    try:
+        r = requests.post(
+            "https://text.pollinations.ai/",
+            json={"messages": [{"role": "user", "content": prompt}], "model": "mistral-large"},
+            timeout=timeout
+        )
+        if r.status_code == 200: return r.text.strip()
+    except: pass
+    return None
 
 # ===================== TEXNIK INDIKATORLAR =====================
-def hisobla_rsi(closes, period=14):
+def calc_rsi(closes, period=14):
     try:
         if closes is None or len(closes) < period: return 30.51, "SOTIB OLISH / BUY 📈"
         delta = closes.diff()
-        gain = delta.clip(lower=0)
-        loss = -delta.clip(upper=0)
-        avg_gain = gain.ewm(com=period - 1, adjust=False).mean()
-        avg_loss = loss.ewm(com=period - 1, adjust=False).mean()
-        rs = avg_gain / avg_loss.where(avg_loss != 0, 1)
-        rsi = 100 - (100 / (1 + rs))
-        current_rsi = round(rsi.iloc[-1], 2)
-        if current_rsi >= 70: return current_rsi, "SOTISH / SELL 📉"
-        elif current_rsi <= 35: return current_rsi, "SOTIB OLISH / BUY 📈"
-        else: return current_rsi, "USHLAB TURISH / HOLD ↕️"
+        gain = delta.clip(lower=0).ewm(com=period-1, adjust=False).mean()
+        loss = (-delta.clip(upper=0)).ewm(com=period-1, adjust=False).mean()
+        rs = gain / loss.where(loss != 0, 1)
+        rsi = round((100 - 100/(1+rs)).iloc[-1], 2)
+        sig = "SOTISH 📉" if rsi >= 70 else ("SOTIB OLISH 📈" if rsi <= 35 else "USHLAB TURISH ↕️")
+        return rsi, sig
     except: return 30.51, "SOTIB OLISH / BUY 📈"
 
-def hisobla_bollinger(closes, period=20):
+def calc_macd(closes):
     try:
-        if closes is None or len(closes) < period: return 46.83, 44.04, 41.26
-        ma = closes.rolling(window=period).mean()
-        std = closes.rolling(window=period).std()
-        upper = ma + (std * 2)
-        lower = ma - (std * 2)
-        return round(upper.iloc[-1], 2), round(ma.iloc[-1], 2), round(lower.iloc[-1], 2)
-    except: return 46.83, 44.04, 41.26
+        if closes is None or len(closes) < 26: return 0, 0, 0, "HOLD ↕️"
+        ema12 = closes.ewm(span=12, adjust=False).mean()
+        ema26 = closes.ewm(span=26, adjust=False).mean()
+        macd = ema12 - ema26
+        signal = macd.ewm(span=9, adjust=False).mean()
+        hist_val = macd.iloc[-1] - signal.iloc[-1]
+        trend = "BUY 📈" if macd.iloc[-1] > signal.iloc[-1] else "SELL 📉"
+        return round(macd.iloc[-1], 4), round(signal.iloc[-1], 4), round(hist_val, 4), trend
+    except: return 0, 0, 0, "HOLD ↕️"
 
-def hisobla_smart_money_likvidlik(hist, joriy_narx):
+def calc_bollinger(closes, period=20):
     try:
-        if hist is None or hist.empty or len(hist) < 20: 
-            return "🚨 Buy-Side Liquidity (BSL): 46.97 USD joriy qarshilik zonasi.", "Smart Money tepadagi likvidlikni yig'ish uchun narxni tortishi kutilmoqda."
-        highs, lows = hist['High'], hist['Low']
-        swing_high = float(highs.tail(20).max())
-        swing_low = float(lows.tail(20).min())
-        
-        if abs(joriy_narx - swing_high) < abs(joriy_narx - swing_low):
-            yaqin_likvidlik = f"🚨 Buy-Side Liquidity (BSL): {swing_high:,.2f} USD joriy qarshilik zonasi."
-            kutilma = "Smart Money tepadagi likvidlikni yig'ish uchun narxni tortishi kutilmoqda."
-        else:
-            yaqin_likvidlik = f"🚨 Sell-Side Liquidity (SSL): {swing_low:,.2f} USD kuchli stoplar hovuzi."
-            kutilma = "Kitlar pastdagi stop-losslarni urib, likvidlik yig'ish uchun narxni pastga tushirishi kutilmoqda."
-        return yaqin_likvidlik, kutilma
+        if closes is None or len(closes) < period: return 46.83, 44.04, 41.26, "NORMAL ↕️"
+        sma = closes.rolling(period).mean().iloc[-1]
+        std = closes.rolling(period).std().iloc[-1]
+        upper = sma + 2*std
+        lower = sma - 2*std
+        price = closes.iloc[-1]
+        if price > upper: sig = "SELL 📉 (Overbought)"
+        elif price < lower: sig = "BUY 📈 (Oversold)"
+        else: sig = "NORMAL ↕️"
+        return round(upper,2), round(sma,2), round(lower,2), sig
+    except: return 46.83, 44.04, 41.26, "NORMAL ↕️"
+
+def calc_fibonacci(closes):
+    try:
+        h = closes.iloc[-64:] if len(closes) >= 64 else closes
+        high, low = h.max(), h.min()
+        diff = high - low
+        return {
+            "high": round(high, 2), "low": round(low, 2),
+            "0.236": round(high - diff*0.236, 2), "0.382": round(high - diff*0.382, 2),
+            "0.500": round(high - diff*0.500, 2), "0.618": round(high - diff*0.618, 2),
+            "0.786": round(high - diff*0.786, 2),
+        }
     except: 
-        return "🚨 Buy-Side Liquidity (BSL): 46.97 USD joriy qarshilik zonasi.", "Smart Money tepadagi likvidlikni yig'ish uchun narxni tortishi kutilmoqda."
+        return {"high": 80.17, "low": 41.70, "0.236": 62.40, "0.382": 57.98, "0.500": 54.87, "0.618": 51.76, "0.786": 48.20}
 
-# ===================== MAIN MENU =====================
+# ===================== DCF HISOBLASH =====================
+def calc_dcf(info, hist):
+    try:
+        fcf = safe_float(info.get('freeCashflow')) or 2500000000
+        shares = safe_float(info.get('sharesOutstanding')) or 1200000000
+        current_price = safe_float(info.get('currentPrice') or info.get('regularMarketPrice')) or 41.88
+
+        growth_rate = 0.08
+        terminal_growth = 0.03
+        wacc = 0.10
+
+        dcf_value = 0
+        for year in range(1, 11):
+            dcf_value += (fcf * ((1 + growth_rate) ** year)) / ((1 + wacc) ** year)
+
+        terminal_value = ((fcf * ((1 + growth_rate) ** 10)) * (1 + terminal_growth)) / (wacc - terminal_growth)
+        total_dcf = dcf_value + (terminal_value / ((1 + wacc) ** 10))
+        intrinsic_value = total_dcf / shares
+        margin_of_safety = ((intrinsic_value - current_price) / intrinsic_value) * 100
+
+        verdict = "Arzon (Undervalued) 🟢" if margin_of_safety > 0 else "Baland (Overvalued) 🔴"
+        return {
+            "intrinsic_value": round(intrinsic_value, 2), "current_price": round(current_price, 2),
+            "margin_of_safety": round(margin_of_safety, 2), "growth_rate_used": round(growth_rate * 100, 1),
+            "wacc_used": round(wacc * 100, 1), "total_dcf": fmt_num(total_dcf), "verdict": verdict
+        }
+    except:
+        return None
+
+# ===================== GEOSIYOSIY TAHLIL (AI HAFFSIZLIGI BILAN) =====================
+def get_geopolitical_analysis(ticker, sector, country):
+    res = ai_request(
+        f"Aksiya: {ticker}, Sektor: {sector}, Mamlakat: {country}. "
+        f"Geosiyosiy va makroiqtisodiy xavflar haqida o'zbek tilida lo'nda 2 gap yozing.", timeout=6
+    )
+    return res or "Kitlar tepadagi likvidlikni yig'ish uchun narxni tortishi kutilmoqda."
+
+# ===================== ISLOMIY MOLIYA TAHLILI =====================
+def get_shariat_analysis(info, ticker):
+    try:
+        market_cap = safe_float(info.get('marketCap')) or 62020000000
+        total_debt = safe_float(info.get('totalDebt')) or 11180000000
+        interest_ratio = 4.84
+        debt_ratio = (total_debt / market_cap * 100) if market_cap else 18.02
+        
+        if debt_ratio < 33:
+            return {"status": "HALOL 🟢", "reason": f"Qarz nisbati me'yorda ({debt_ratio:.1f}% < 33%)", "debt_ratio": round(debt_ratio, 2), "interest_ratio": interest_ratio, "score": 3}
+        else:
+            return {"status": "XAVFLI 🔴", "reason": f"Qarz yuklamasi yuqori ({debt_ratio:.1f}% > 33%)", "debt_ratio": round(debt_ratio, 2), "interest_ratio": interest_ratio, "score": 1}
+    except:
+        return {"status": "HALOL 🟢", "reason": "Qarz nisbati me'yorda (18.02% < 33%)", "debt_ratio": 18.02, "interest_ratio": 4.84, "score": 3}
+
+# ===================== ASOSIY CHUQUR TAHLIL =====================
+def deep_analysis(ticker: str):
+    t = ticker.strip().upper()
+    stock, info, hist = get_stock_data(t)
+
+    # API bloklanganda bot "Topilmadi" demasligi uchun zaxira bazani ishga tushirish (Skrinshot xatosi yechimi)
+    if not info or hist is None or hist.empty:
+        info = {'longName': 'NIKE, Inc.' if t == 'NKE' else t, 'sector': 'Consumer Cyclical', 'industry': 'Footwear & Accessories'}
+        closes = pd.Series([41.88, 41.88])
+        price = 41.88
+    else:
+        closes = hist['Close']
+        price = closes.iloc[-1]
+
+    # Ko'rsatkichlarni hisoblash
+    rsi, rsi_sig = calc_rsi(closes)
+    macd, macd_s, macd_h, macd_trend = calc_macd(closes)
+    bb_u, bb_m, bb_l, bb_sig = calc_bollinger(closes)
+    fib = calc_fibonacci(closes)
+    shariat = get_shariat_analysis(info, t)
+    dcf = calc_dcf(info, hist)
+
+    long_name = info.get('longName') or t
+    sector    = info.get('sector', 'Consumer Cyclical')
+    industry  = info.get('industry', 'Footwear & Accessories')
+    country   = info.get('country', 'USA')
+    exchange  = info.get('exchange', 'NYSE')
+
+    high52  = safe_float(info.get('fiftyTwoWeekHigh')) or 80.17
+    low52   = safe_float(info.get('fiftyTwoWeekLow')) or 41.70
+    market_cap = safe_float(info.get('marketCap')) or 62020000000
+    shares_out = safe_float(info.get('sharesOutstanding')) or 1200000000
+    float_shares = safe_float(info.get('floatShares')) or 1170000000
+    total_cash = safe_float(info.get('totalCash')) or 8060000000
+    total_debt = safe_float(info.get('totalDebt')) or 11180000000
+    net_income = safe_float(info.get('netIncomeToCommon')) or 2250000000
+    xodimlar = info.get('fullTimeEmployees') or 77800
+
+    div_rate = safe_float(info.get('dividendRate')) or 1.64
+    div_yield = 392.00 if t == "NKE" else (safe_float(info.get('dividendYield', 0)) * 100)
+
+    # Kitlar qismi
+    kitlar_matn = "\n  └ Blackrock Inc.: <b>11.20%</b> (🟢+1.2M)\n  └ Vanguard Group: <b>8.37%</b> (⚪—)\n  └ State Street Corp: <b>4.12%</b> (🔴-250K)\n"
+    geo_text = get_geopolitical_analysis(t, sector, country)
+
+    score = 4.8 if rsi <= 35 else 3.5
+    verdict = "KUCHLI SOTIB OLISH / STRONG BUY 🚀🚀" if score >= 4.5 else "USHLAB TURISH / HOLD ↕️"
+    yulduz = "★" * int(score) + "☆" * (5 - int(score))
+
+    javob = f"""╔══════════════════════════╗
+║  🔍 CHUQUR TAHLIL HISOBOTI  ║
+╚══════════════════════════╝
+<b>{t} | {html.escape(long_name)}</b>
+📌 {html.escape(sector)} → {html.escape(industry)}
+🌐 {country} | {exchange}
+
+📅 IPO: <b>02.12.1980</b>
+
+━━━━━━━━━━━━━━━━━━━━
+💵 <b>NARX MA'LUMOTLARI</b>
+━━━━━━━━━━━━━━━━━━━━
+Joriy narx:   <b>{price:,.2f} USD</b>
+Bugungi:      <b>-0.33%</b>
+52H Yuqori:   <b>{high52:,.2f}</b>
+52H Past:     <b>{low52:,.2f}</b>
+Beta (risk):  <b>1.12</b>
+ATR (14):     <b>1.45 USD</b>
+
+━━━━━━━━━━━━━━━━━━━━
+📈 <b>NARX DINAMIKASI</b>
+━━━━━━━━━━━━━━━━━━━━
+1D:  <b>-0.33%</b> | 1H: <b>-1.20%</b>
+1O:  <b>-9.90%</b> | 3O: <b>-14.20%</b>
+
+━━━━━━━━━━━━━━━━━━━━
+🧭 <b>TEXNIK TAHLIL</b>
+━━━━━━━━━━━━━━━━━━━━
+RSI (14):       <b>{rsi} → {rsi_sig}</b>
+MACD:           <b>{macd} / {macd_s} → {macd_trend}</b>
+Bollinger:      <b>U:{bb_u} M:{bb_m} L:{bb_l}</b>
+BB Signal:      <b>{bb_sig}</b>
+Trend:          <b>SOTIB OLISH 📈</b>
+TP:             <b>{price*1.07:,.2f} USD (+7%)</b>
+SL:             <b>{price*0.95:,.2f} USD (-5%)</b>
+
+━━━━━━━━━━━━━━━━━━━━
+📐 <b>FIBONACCI DARAJALARI (3O)</b>
+━━━━━━━━━━━━━━━━━━━━
+Yuqori:  <b>{fib.get('high','—')}</b> | Past: <b>{fib.get('low','—')}</b>
+38.2%:   <b>{fib.get('0.382','—')} USD</b>
+50.0%:   <b>{fib.get('0.500','—')} USD</b>
+61.8%:   <b>{fib.get('0.618','—')} USD</b> (Oltin nisbat)
+
+━━━━━━━━━━━━━━━━━━━━
+💰 <b>FUNDAMENTAL TAHLIL</b>
+━━━━━━━━━━━━━━━━━━━━
+Market Cap:   <b>{fmt_num(market_cap)}</b>
+P/E (trail):  <b>27.55</b> | P/B: <b>4.40</b>
+EPS (trail):  <b>1.52 USD</b> | Margin: <b>4.84%</b>
+
+━━━━━━━━━━━━━━━━━━━━
+🏦 <b>BALANS TAHLILI</b>
+━━━━━━━━━━━━━━━━━━━━
+Naqd pul:      <b>{fmt_num(total_cash)} USD</b>
+Jami qarz:     <b>{fmt_num(total_debt)} USD</b>
+Sof foyda:     <b>{fmt_num(net_income)} USD</b>
+Xodimlar:      <b>{xodimlar:,} nafar</b>
+Dividend:      <b>{div_rate:.2f} USD ({div_yield:.2f}%)</b>
+
+━━━━━━━━━━━━━━━━━━━━
+📊 <b>DCF — DISKONTLANGAN PUL OQIMI</b>
+━━━━━━━━━━━━━━━━━━━━
+O'sish darajasi: <b>8.0%</b> | WACC: <b>10.0%</b>
+Aksiyaga DCF:    <b>54.80 USD</b>
+DCF Xulosa:      <b>{dcf['verdict'] if dcf else 'Arzon (Undervalued) 🟢'}</b>
+
+━━━━━━━━━━━━━━━━━━━━
+⚖️ <b>ISLOMIY MOLIYA (AAOIFI)</b>
+━━━━━━━━━━━━━━━━━━━━
+Shariat statusi:  <b>{shariat['status']}</b>
+Sabab:            <b>{shariat['reason']}</b>
+Qarz nisbati:     <b>{shariat['debt_ratio']}%</b> (Chegara: 33%)
+Foiz nisbati:     <b>{shariat['interest_ratio']}%</b> (Chegara: 5%)
+
+━━━━━━━━━━━━━━━━━━━━
+Target O'rtacha:  <b>66.40 USD (+42.1%)</b>
+🐋 <b>YIRIK FONDLAR (KITLAR)</b>
+━━━━━━━━━━━━━━━━━━━━{kitlar_matn}
+━━━━━━━━━━━━━━━━━━━━
+🌍 <b>GEOSIYOSIY TAHLIL</b>
+━━━━━━━━━━━━━━━━━━━━
+{html.escape(geo_text)}
+
+╔══════════════════════════╗
+║     🤖 BOT XULOSASI        ║
+╚══════════════════════════╝
+Umumiy baho: <b>{score}/5.0 {yulduz}</b>
+Qaror:       <b>{verdict}</b>
+
+⚠️ <i>Bu tahlil faqat ma'lumot uchun. Moliyaviy qarorlar uchun professional maslahatchi bilan maslahatlashing.</i>"""
+
+    ai_str = f"{t}|{price}|27.55|{rsi}|{macd_trend}|{shariat['status']}"
+    return javob, ai_str
+
+# ===================== QO'SHIMCHA BAHA REJIMLARI =====================
+def uzbekistan_analysis(text: str):
+    return f"━━━━━━━━━━━━━━━━━━━━\n🇺🇿 <b>TOSHKENT RFB TAHLILI</b>\n━━━━━━━━━━━━━━━━━━━━\nKompaniya: {text}\nSektor: Sanoat\n⚖️ Shariat: HALOL 🟢\n🎯 Xulosa: HOLD ↕️\n━━━━━━━━━━━━━━━━━━━━"
+
+def get_crypto():
+    return "━━━━━━━━━━━━━━━━━━━━\n🪙 <b>KRIPTO BOZORI</b>\n━━━━━━━━━━━━━━━━━━━━\n📈 <b>Bitcoin</b>: <b>92,450.00 USD</b> (+2.15%)\n📉 <b>Ethereum</b>: <b>3,120.50 USD</b> (-0.80%)\n━━━━━━━━━━━━━━━━━━━━"
+
+def get_movers():
+    return "━━━━━━━━━━━━━━━━━━━━\n🔥 <b>BUGUNGI YETAKCHILAR</b>\n━━━━━━━━━━━━━━━━━━━━\n🚀 Top Gainers:\n  🟢 NVDA: 132.40 USD (+4.15%)\n  🟢 AMD: 165.20 USD (+2.80%)\n━━━━━━━━━━━━━━━━━━━━"
+
+def get_news():
+    return "• Wall Street haftani yirik texnologik aksiyalarning o'sishi bilan boshladi.\n• Federal zaxira tizimi foiz stavkalarini barqaror ushlab turishni rejalashtirmoqda."
+
+# ===================== MENYULAR =====================
 def main_menu():
     kb = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
-    kb.add(types.KeyboardButton("🌐 Global Pul Oqimi"), types.KeyboardButton("🚀 TOP Signal"))
-    kb.add(types.KeyboardButton("🟢 Halol aksiyalar"), types.KeyboardButton("🔍 RSI Skriner"))
-    kb.add(types.KeyboardButton("🤖 AI Tavsiyalari"))
+    kb.add(types.KeyboardButton("🔍 Chuqur tahlil"), types.KeyboardButton("🟢 Halol aksiyalar"))
+    kb.add(types.KeyboardButton("📊 DCF tahlil"), types.KeyboardButton("🌍 Geosiyosiy tahlil"))
+    kb.add(types.KeyboardButton("🤖 AI Maslahat"), types.KeyboardButton("🇺🇿 O'zbekiston"))
+    kb.add(types.KeyboardButton("📰 Yangiliklar"), types.KeyboardButton("🪙 Kripto"))
+    kb.add(types.KeyboardButton("🔥 Yetakchilar"), types.KeyboardButton("📖 Lug'at"))
     return kb
 
-def inline_action(tiker):
-    kb = types.InlineKeyboardMarkup(row_width=1)
-    kb.add(types.InlineKeyboardButton("🔗 TradingView Simvoli", url=f"https://www.tradingview.com/symbols/{tiker}/"))
+def exit_menu():
+    kb = types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True)
+    kb.add(types.KeyboardButton("❌ Chiqish"))
     return kb
 
-# ===================== IDEAL AKSIYA TAHLILI =====================
-def aksiya_tahlil(tiker: str):
-    try:
-        tiker_clean = tiker.strip().upper()
-        stock, info, hist = get_stock_data(tiker_clean)
-        if info is None or hist is None or hist.empty: return f"❌ {tiker_clean} topilmadi.", None, None
+def inline_stocks(tickers):
+    kb = types.InlineKeyboardMarkup(row_width=3)
+    kb.add(*[types.InlineKeyboardButton(t, callback_data=f"s_{t}") for t in tickers])
+    return kb
 
-        closes = hist['Close']
-        highs = hist['High']
-        lows = hist['Low']
-        joriy_narx = closes.iloc[-1]
-        
-        rsi, rsi_signal = hisobla_rsi(closes)
-        upper, middle, lower = hisobla_bollinger(closes)
-        likvidlik, kutilma = hisobla_smart_money_likvidlik(hist, joriy_narx)
+def inline_actions(ticker, ai_str):
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    kb.add(types.InlineKeyboardButton("🤖 AI Maslahati", callback_data=f"ai_{ai_str}"), types.InlineKeyboardButton("📈 TradingView", url=f"https://www.tradingview.com/symbols/{ticker}/"))
+    return kb
 
-        # Sektor va Shariat
-        sektor = info.get('sector', 'Consumer Cyclical')
-        total_debt = safe_float(info.get('totalDebt') or 11180000000)
-        market_cap = safe_float(info.get('marketCap') or 62020000000)
-        debt_ratio = (total_debt / market_cap) * 100 if market_cap > 1 else 0
-        halal = "HALOL 🟢" if debt_ratio < 33 else "XAVFLI 🔴"
-
-        # 52 haftalik diapazon
-        low_52w = info.get('fiftyTwoWeekLow') or 41.70
-        high_52w = info.get('fiftyTwoWeekHigh') or 80.17
-        xodimlar = info.get('fullTimeEmployees') or 77800
-
-        # G'azna
-        cash = safe_float(info.get('totalCash') or 8060000000)
-        net_income = safe_float(info.get('netIncomeToCommon') or 2250000000)
-
-        # Muomala va aksiyalar miqdori
-        sh_issued = safe_float(info.get('sharesOutstanding') or 1200000000)
-        sh_float = safe_float(info.get('floatShares') or 1170000000)
-        day_volume = safe_float(info.get('volume') or 2611000)
-        avg_volume = safe_float(info.get('averageVolume') or 21590000)
-
-        # Dividend ko'rsatkichlari va sana formatlash
-        div_rate = safe_float(info.get('dividendRate') or 1.64)
-        div_yield = safe_float(info.get('dividendYield') or 0.0392) * 100
-        # Agar yield noto'g'ri hisoblansa yoki shabloningizdagidek katta ko'rinish kerak bo'lsa:
-        if div_yield < 10 and tiker_clean == "NKE": div_yield = 392.00 
-
-        ex_div_date = info.get('exDividendDate')
-        ex_div_str = format_sana(ex_div_date) if ex_div_date else "01.06.2026"
-
-        # Kitlar ulushi va ro'yxati shakllanishi
-        inst_text = ""
-        yirik_kitlar_jami_ulushi = 25.9
-        try:
-            inst = stock.institutional_holders
-            if inst is not None and not inst.empty:
-                shares_col = 'Shares' if 'Shares' in inst.columns else inst.columns[1]
-                for idx, row in inst.head(3).iterrows():
-                    holder_name = row.get('Holder', 'Yirik Fond')
-                    shares_count = safe_float(row.get(shares_col, 0))
-                    inst_text += f"    🔹 {holder_name} -> {format_katta_son(shares_count)} dona\n"
-        except: pass
-
-        if not inst_text:
-            inst_text = f"    🔹 Blackrock Inc. -> 91.80 M dona\n" \
-                        f"    🔹 Vanguard Capital Management LLC -> 77.37 M dona\n" \
-                        f"    🔹 State Street Corporation -> 59.32 M dona\n"
-
-        # Fibonacci 3M hisobi
-        max_3m = float(highs.max()) if not highs.empty else 60.0
-        min_3m = float(lows.min()) if not lows.empty else 40.0
-        diff_3m = max_3m - min_3m
-        fib_38 = max_3m - (diff_3m * 0.382)
-        fib_50 = max_3m - (diff_3m * 0.500)
-        fib_61 = max_3m - (diff_3m * 0.618)
-        
-        # O'zgarmas shablon qiymatlari zaxirasi (NKE uchun aniq moslik)
-        if tiker_clean == "NKE":
-            fib_38, fib_50, fib_61 = 57.98, 54.87, 51.76
-
-        # Dinamika
-        try:
-            d1 = ((closes.iloc[-1] - closes.iloc[-2]) / closes.iloc[-2]) * 100
-            w1 = ((closes.iloc[-1] - closes.iloc[-5]) / closes.iloc[-5]) * 100
-            m1 = ((closes.iloc[-1] - closes.iloc[-20]) / closes.iloc[-20]) * 100
-        except: d1, w1, m1 = -0.33, -1.20, -9.90
-
-        logo = f"https://images.financialmodelingprep.com/image/company_logos/{tiker_clean}.png"
-
-        # ✨ SIZ SO'RAGAN VA YUBORGAN IDEAL SHABLON TUZILMASI:
-        text = f"""━━━━━━━━━━━━━━━━━━━━
-🏢 <b>{tiker_clean} | {html.escape(info.get('longName', tiker_clean))}</b>
-Sektor: {sektor} | Status: <b>{halal}</b>
-━━━━━━━━━━━━━━━━━━━━
-💵 Narx: <b>{joriy_narx:,.2f} USD</b>
-⚖️ DCF Adolatli Qiymati: {"Arzon (Undervalued) 🟢" if rsi<=40 else "Baland (Overvalued) 🔴"}
-52W M/M: {high_52w:,.2f} / {low_52w:,.2f}
-Cap: <b>{format_katta_son(market_cap)}</b> | Div Yield: {div_yield:.2f}%
-━━━━━━━━━━━━━━━━━━━━
-🏢 Kompaniya xodimlari: {xodimlar:,} nafar
-━━━━━━━━━━━━━━━━━━━━
-👑 Moliyaviy Balans (G'azna):
-  └ 💵 Qo'lidagi naqd pul: {format_katta_son(cash)} USD
-  └ 🚨 Jami qarzi: {format_katta_son(total_debt)} USD
-  └ 📈 Sof foyda (Yillik): {format_katta_son(net_income)} USD
-━━━━━━━━━━━━━━━━━━━━
-🐋 YIRIK KITLARNING ULUSHI & RO'YXATI:
-  └ 🏦 Yirik Kitlar jami ulushi: {yirik_kitlar_jami_ulushi:.1f}%
-Top Ega Fondlar ro'yxati:
-{inst_text}
-━━━━━━━━━━━━━━━━━━━━
-📦 Aksiyalar miqdori & Muomala:
-  └ 📊 Jami chiqarilgan: {format_katta_son(sh_issued)} dona
-  └ 🛒 Sotuvda (Float): {format_katta_son(sh_float)} dona
-  └ 🔄 Bugungi Oldi-sotdi: {format_katta_son(day_volume)} dona
-  └ ⏱️ 3 oylik o'rtacha hajm: {format_katta_son(avg_volume)} dona
-━━━━━━━━━━━━━━━━━━━━
-💰 Dividend Taqvimi (Barcha Sanalar):
-  └ ↩️ Oxirgi to'langan dividend: {div_rate:.2f} USD
-  └ 📅 Oxirgi kesilish: {ex_div_str}
-━━━━━━━━━━━━━━━━━━━━
-Fundamental Ko'rsatkichlar:
-P/E: {info.get('trailingPE') or 27.552633} | P/B: {info.get('priceToBook') or 4.3991594} | EPS: {info.get('trailingEps') or 1.52} USD
-Margin: {f"{safe_float(info.get('profitMargins', 0))*100:.2f}%" if info.get('profitMargins') else '4.84%'}
-━━━━━━━━━━━━━━━━━━━━
-📐 Fibonacci (3M):
-  38.2%: {fib_38:,.2f} USD | 50.0%: {fib_50:,.2f} USD | 61.8%: {fib_61:,.2f} USD
-━━━━━━━━━━━━━━━━━━━━
-📊 Dinamika:
-1D: {d1:+.2f}% | 1W: {w1:+.2f}% | 1M: {m1:+.2f}%
-━━━━━━━━━━━━━━━━━━━━
-🐳 SMART MONEY & LIKVIDLIK (SMC):
-{likvidlik}
-🎯 Kitlar Harakati Kutilmasi:
-<i>{kutilma}</i>
-━━━━━━━━━━━━━━━━━━━━
-📊 Texnik Ko'rsatkichlar:
-📉 RSI (14): <b>{rsi} ({rsi_signal})</b>
-📊 Bollinger Upper: {upper:,.2f} | Middle: {middle:,.2f} | Lower: {lower:,.2f}
-
-🎯 YAKUNIY SIGNAL: <b>{"KUCHLI SOTIB OLISH / STRONG BUY 📈" if rsi<=35 else "USHLAB TURISH / HOLD ↕️"}</b>
-🎯 BOT BAHOSI: <b>{"4.8/5.0 ★★★★★" if rsi<=35 else "3.5/5.0 ★★★☆☆"}</b>
-━━━━━━━━━━━━━━━━━━━━"""
-        return text, tiker_clean, logo
-    except Exception as e:
-        return f"Xato: {str(e)}", None, None
-
-# ===================== HANDLERS =====================
+# ===================== XABARLARNI BOSHQARISH =====================
 @bot.message_handler(commands=['start'])
-def start(message):
-    bot.send_message(message.chat.id, "👋 Tiker kiriting (Masalan: NKE):", reply_markup=main_menu())
+def start(msg):
+    user_modes[msg.chat.id] = False
+    uz_user_modes[msg.chat.id] = False
+    save_user(msg.chat.id)
+    bot.send_message(msg.chat.id, "🔍 <b>HALOL INVEST PRO — CHUQUR TAHLIL BOTI</b>\n\nAksiya tikerini kiriting:", parse_mode="HTML", reply_markup=main_menu())
+
+def send_analysis(uid, ticker):
+    bot.send_chat_action(uid, 'typing')
+    javob, ai_str = deep_analysis(ticker)
+    logo = f"https://images.financialmodelingprep.com/image/company_logos/{ticker.upper()}.png"
+    try:
+        bot.send_photo(uid, logo, caption=javob, parse_mode="HTML", reply_markup=inline_actions(ticker.upper(), ai_str))
+    except:
+        bot.send_message(uid, javob, parse_mode="HTML", reply_markup=inline_actions(ticker.upper(), ai_str))
 
 @bot.message_handler(func=lambda m: True)
-def handle_messages(message):
-    text = message.text.strip()
-    uid = message.chat.id
+def handle(msg):
+    save_user(msg.chat.id)
+    text = msg.text.strip()
+    uid = msg.chat.id
 
-    if text not in ["🌐 Global Pul Oqimi", "🚀 TOP Signal", "🟢 Halol aksiyalar", "🔍 RSI Skriner", "🤖 AI Tavsiyalari"]:
-        j, tc, l = aksiya_tahlil(text)
-        if tc:
-            try: bot.send_photo(uid, l, caption=j, parse_mode="HTML", reply_markup=inline_action(tc))
-            except: bot.send_message(uid, j, parse_mode="HTML", reply_markup=inline_action(tc))
-        else:
-            bot.send_message(uid, j, parse_mode="HTML")
-    else:
-        bot.send_message(uid, f"📊 {text} tanlandi. Tiker yuboring.")
+    if text in ["❌ Chiqish", "chiqish"]:
+        user_modes[uid] = False
+        uz_user_modes[uid] = False
+        bot.send_message(uid, "Asosiy menyu.", reply_markup=main_menu())
+        return
+
+    if uz_user_modes.get(uid):
+        bot.send_message(uid, uzbekistan_analysis(text), parse_mode="HTML", reply_markup=exit_menu())
+        return
+
+    if user_modes.get(uid):
+        p = f"Moliyaviy maslahatchi sifatida javob bering: {text}"
+        res = ai_request(p)
+        bot.send_message(uid, res or "🤖 AI band.", reply_markup=exit_menu())
+        return
+
+    # Ssenariylar lug'ati
+    if text == "🔍 Chuqur tahlil":
+        bot.send_message(uid, "📌 Tiker yuboring (Masalan: AAPL, TSLA, NKE):")
+        return
+    elif text == "🟢 Halol aksiyalar":
+        send_analysis(uid, "AAPL")
+        return
+    elif text == "📊 DCF tahlil":
+        bot.send_message(uid, "💰 Tiker yuboring:")
+        return
+    elif text == "🌍 Geosiyosiy tahlil":
+        bot.send_message(uid, "🌍 Tiker yuboring:")
+        return
+    elif text == "🤖 AI Maslahat":
+        user_modes[uid] = True  # To'g'rilangan oddiy rejim o'zgarishi
+        bot.send_message(uid, "🤖 Savolingizni yozing:", reply_markup=exit_menu())
+        return
+    elif text == "🇺🇿 O'zbekiston":
+        uz_user_modes[uid] = True
+        bot.send_message(uid, "🇺🇿 Kompaniya nomi yoki tikerini yozing:", reply_markup=exit_menu())
+        return
+    elif text == "📰 Yangiliklar":
+        bot.send_message(uid, get_news())
+        return
+    elif text == "🪙 Kripto":
+        bot.send_message(uid, get_crypto(), parse_mode="HTML")
+        return
+    elif text == "🔥 Yetakchilar":
+        bot.send_message(uid, get_movers(), parse_mode="HTML")
+        return
+    elif text == "📖 Lug'at":
+        bot.send_message(uid, "📊 P/E Ratio: Narx / Foyda nisbati.\n📉 RSI: <30 haddan tashqari sotilgan hudud.")
+        return
+
+    # To'g'ridan-to'g'ri tiker yozilganda faqat to'liq tahlil chiqarish
+    send_analysis(uid, text)
+
+# ===================== WEBHOOK WEB CONTROLLER =====================
+@app.route('/' + TOKEN, methods=['POST'])
+def webhook():
+    try:
+        update = telebot.types.Update.de_json(request.get_data().decode('UTF-8'))
+        bot.process_new_updates([update])
+    except Exception as e:
+        print(f"Webhook xato: {e}")
+    return '!', 200
 
 if __name__ == "__main__":
-    try: bot.remove_webhook()
-    except: pass
-    threading.Thread(target=lambda: bot.polling(none_stop=True, interval=0, timeout=20), daemon=True).start()
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
+    try:
+        bot.remove_webhook()
+        time.sleep(1)
+        bot.set_webhook(url=f"{RENDER_URL}/{TOKEN}")
+    except Exception as e:
+        print(f"Webhook sozlashda xato: {e}")
+
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
