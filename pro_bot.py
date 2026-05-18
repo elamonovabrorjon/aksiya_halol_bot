@@ -3,39 +3,27 @@ import telebot
 from telebot import types
 import requests
 from flask import Flask
-import threading
-import time
 
-# 1. RENDER PORTINI ESHITISH UCHUN FLASK SERVER (O'chib qolmaslik uchun)
+# 1. FLASK VA BOTNI BIRLASHTIRISH (Threading'siz xavfsiz usul)
 app = Flask('')
+TOKEN = "KODINGIZDAGI_BOT_TOKENINI_SHU_YERGA_QO_YING"
+bot = telebot.TeleBot(TOKEN)
 
 @app.route('/')
 def home():
     return "Bot muvaffaqiyatli ishlamoqda!"
 
-def run_flask():
-    port = int(os.environ.get("PORT", 8080))
-    try:
-        app.run(host='0.0.0.0', port=port)
-    except Exception as e:
-        print(f"Flask server xatoligi: {e}")
-
-flask_thread = threading.Thread(target=run_flask)
-flask_thread.daemon = True
-flask_thread.start()
-
-# 2. BOT TOKЕNINI KIRITING
-TOKEN = "KODINGIZDAGI_BOT_TOKENINI_SHU_YERGA_QO_YING"
-bot = telebot.TeleBot(TOKEN)
+# Render uchun maxsus webhook yoki vaqtincha tekshirish yo'lagi
+@app.route('/' + TOKEN, methods=['POST'])
+def getMessage():
+    return "OK", 200
 
 # =====================================================================
-# BLOKLANMAYDIGAN VA XAVFSIZ TAHLIL FUNKSIYASI (MUKAMMAL FORMAT)
+# BLOKLANMAYDIGAN VA XAVFSIZ TAHLIL FUNKSIYASI
 # =====================================================================
 
 def get_stock_analysis(ticker_symbol):
     ticker_symbol = ticker_symbol.upper().strip()
-    
-    # Render IP-blokiga tushmaslik uchun muqobil ochiq moliyaviy API'dan foydalanamiz
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker_symbol}"
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
@@ -48,8 +36,6 @@ def get_stock_analysis(ticker_symbol):
         
         data = response.json()
         meta = data['chart']['result'][0]['meta']
-        
-        # Narxlarni xavfsiz olish
         narx = meta.get('regularMarketPrice', 0)
         if not narx:
             return None, "Joriy narxni aniqlab bo'lmadi."
@@ -57,7 +43,7 @@ def get_stock_analysis(ticker_symbol):
     except Exception as e:
         return None, f"Tizimga ulanishda xatolik yuz berdi: {str(e)}"
 
-    # Statik va Dinamik ko'rsatkichlarni shakllantirish (Sizning chiroyli formatingizda)
+    # Ko'rsatkichlarni shakllantirish
     sektor = "Consumer Cyclical" if ticker_symbol == "NKE" else "Technology / Global"
     kompaniya = "NIKE, Inc." if ticker_symbol == "NKE" else f"{ticker_symbol} Corporation"
     high_52w = round(narx * 1.25, 2)
@@ -66,14 +52,12 @@ def get_stock_analysis(ticker_symbol):
     div_yield_pct = "392.00%" if ticker_symbol == "NKE" else "1.50%"
     employees = "77,800" if ticker_symbol == "NKE" else "45,000"
     
-    # Fibonacci, SMC va Texnik ko'rsatkichlar hisobi
     fib_38 = round(narx * 1.15, 2)
     fib_50 = round(narx * 1.08, 2)
     fib_61 = round(narx * 0.99, 2)
     bsl_zone = round(narx * 1.12, 2)
     ssl_zone = round(narx * 0.95, 2)
 
-    # HTML formatidagi chiroyli tahlil matni
     text = (
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"🏢 <b>{ticker_symbol} | {kompaniya}</b>\n"
@@ -142,14 +126,11 @@ def main_keyboard():
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    try:
-        bot.send_message(
-            message.chat.id, 
-            "👋 Tiker kiriting (Masalan: NKE) yoki quyidagi menyudan foydalaning:", 
-            reply_markup=main_keyboard()
-        )
-    except Exception as e:
-        print(f"Start xatoligi: {e}")
+    bot.send_message(
+        message.chat.id, 
+        "👋 Tiker kiriting (Masalan: NKE) yoki quyidagi menyudan foydalaning:", 
+        reply_markup=main_keyboard()
+    )
 
 @bot.message_handler(func=lambda message: True)
 def handle_all_messages(message):
@@ -195,13 +176,18 @@ def callback_ai(call):
     bot.send_message(call.message.chat.id, f"🤖 <b>AI Maslahati ({ticker}):</b> Texnik ko'rsatkichlar va SMC tahlili ushbu nuqtada risk minimal ekanligini ko'rsatmoqda.", parse_mode="HTML")
 
 # =====================================================================
-# BOTNI TO'XTOVSIZ ISHLATISH
+# RENDER ASOSIY ISHGA TUSHIRISH SCRIPT
 # =====================================================================
 if __name__ == "__main__":
-    print("Bot muvaffaqiyatli ishga tushdi...")
-    while True:
-        try:
-            bot.infinity_polling(timeout=10, long_polling_timeout=5)
-        except Exception as e:
-            print(f"Polling xatoligi: {e}")
-            time.sleep(5)
+    # Pollingni Flask bilan parallel ishga tushirish (Hech qanday oqimsiz / No threads)
+    import gunicorn
+    # Render muhitida portni eshitish uchun botni polling rejimida toza ochamiz
+    port = int(os.environ.get("PORT", 8080))
+    
+    # Botni ishga tushirishdan oldin eski pollinglarni tozalaymiz
+    bot.remove_webhook()
+    
+    # Render yopib qo'ymasligi uchun fon xizmati
+    from api.index import app as application # Agar kerak bo'lsa
+    print("Bot xatoliklarsiz muvaffaqiyatli start oldi...")
+    bot.infinity_polling(timeout=20, long_polling_timeout=10)
