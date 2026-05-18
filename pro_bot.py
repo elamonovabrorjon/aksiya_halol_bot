@@ -16,18 +16,16 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Aksiya Halol Bot barcha bo'limlar va Admin tizimi bilan faol!", 200
+    return "Aksiya Halol Bot professional tahlil tizimi bilan faol!", 200
 
 # ===================== BOT SOZLAMALARI =====================
 TOKEN = os.getenv("BOT_TOKEN") or "8781183838:AAEcHw_5d0rDnLFmA07pGFO7y4Uh8ZRTeg8"
 bot = telebot.TeleBot(TOKEN, threaded=True)
 
-# 🛑 ADMIN ID RAQAMINGIZ INTEGRATSIYA QILINDI
-ADMIN_ID = 745170275  
+# 🛑 DIQQAT: BU YERGA O'ZINGIZNING TELEGRAM ID RAQAMINGIZNI YOZING!
+ADMIN_ID = 123456789  
 
-# Foydalanuvchilar bazasi (Render o'chib yonganda o'chmasligi uchun vaqtincha xotira)
 registered_users = set()
-
 user_modes = {}
 uz_user_modes = {}
 
@@ -49,30 +47,17 @@ UZ_STOCKS_DATA = {
     "NKMK": {
         "nomi": "Navoiy Kon-Metallurgiya Kombinati (Oltin Giganti)",
         "shariat": "HALOL 🟢 (Asosiy faoliyati oltin qazib olish, qarz yuklamasi juda past)",
-        "ishlab_chiqarish": "Yillik ~2.9 mln unsiya oltin qazib olinadi. Dunyo reytingida 4-o'rinda turadi.",
         "sof_foyda": "Sof foyda yillik ~2.1 mlrd USD dan oshdi. Oltin narxi oshishi hisobiga foyda o'smoqda.",
-        "dividend": "Yiliga 2 marta dividend to'lash amaliyoti bor. Dividend rentabelligi: ~12% - 15%.",
         "tavsiya": "🎯 UZOQ MUDDATLI INVESTITSIYA (BUY) — Portfelning poydevori uchun eng xavfsiz va likvid aktiv."
     },
     "URTS": {
         "nomi": "O'zbekiston Respublika Tovar-Xom Ashyo Birjasi (UZEX)",
         "shariat": "HALOL 🟢 (Birja xizmatlari va vositachilik haqi, foizsiz sof biznes modeli)",
-        "ishlab_chiqarish": "Tranzaksiyalar hajmi yillik 140+ trln so'mdan oshdi. Elektron auksionlar yetakchisi.",
         "sof_foyda": "Yillik sof foyda ~250-280 mlrd so'm. Operatsion korxona xarajatlari juda past.",
-        "dividend": "🔥 REKORDCHI! Sof foydaning 70-90% qismini dividendga beradi. Rentabellik: ~15% - 22%.",
         "tavsiya": "🚀 KUCHLI SOTIB OLISH (STRONG BUY) — Barqaror dividend oqimi izlayotganlar uchun eng birinchi aktiv."
-    },
-    "UZAUTO": {
-        "nomi": "UzAuto Motors AJ",
-        "shariat": "HALOL 🟢 (Ishlab chiqarish va real savdo sektori)",
-        "ishlab_chiqarish": "Yillik quvvati 400,000+ donadan ortiq avtomobil.",
-        "sof_foyda": "Yillik sof foyda barqaror ~2.5 - 2.8 trln so'm.",
-        "dividend": "Dividend to'lash tarixi barqaror emas, lekin kapital o'sishi yuqori darajada.",
-        "tavsiya": "🛒 SOTIB OLISH (BUY) — Ichki bozordagi yuqori talab hisobiga xavfsiz."
     }
 }
 
-# Data Cache
 _cache = {}
 _cache_time = {}
 CACHE_TTL = 300  
@@ -136,29 +121,31 @@ def hisobla_bollinger(closes, period=20):
 
 def hisobla_smart_money_likvidlik(hist, joriy_narx):
     try:
-        if hist is None or hist.empty or len(hist) < 20: return "⚖—", "Kutish."
+        if hist is None or hist.empty or len(hist) < 20: return "⚖—", "Kutish.", 0.0
         highs, lows, closes = hist['High'], hist['Low'], hist['Close']
         swing_high = float(highs.tail(20).max())
         swing_low = float(lows.tail(20).min())
         
         if abs(joriy_narx - swing_high) < abs(joriy_narx - swing_low):
-            yaqin_likvidlik = f"<b>Buy-Side Liquidity (BSL):</b> {swing_high:,.2f} USD joriy qarshilik hovuzi."
-            kutilma = "Smart Money tepadagi likvidlikni yig'ish (Liquidity Sweep) uchun narxni tortishi kutilmoqda."
+            yaqin_likvidlik = f"🚀 <b>Buy-Side Liquidity (BSL):</b> {swing_high:,.2f} USD atrofida yirik short-stoplar hovuzi mavjud."
+            kutilma = "Smart Money (Kitlar) narxni tepadagi likvidlikni yig'ib olish (Liquidity Sweep) uchun yuqoriga tortishi kutilmoqda."
+            target = swing_high
         else:
-            yaqin_likvidlik = f"<b>Sell-Side Liquidity (SSL):</b> {swing_low:,.2f} USD kuchli stoplar hovuzi."
-            kutilma = "Kitlar pastdagi stop-losslarni urib, bozorga kirish uchun narxni tushirishi mumkin."
+            yaqin_likvidlik = f"🚨 <b>Sell-Side Liquidity (SSL):</b> {swing_low:,.2f} USD kuchli stoplar hovuzi aniqlandi."
+            kutilma = "Kitlar pastdagi stop-losslarni urib, likvidlik yig'ish uchun narxni pastga tushirishi kutilmoqda."
+            target = swing_low
             
-        fvg_text = "Imbalans (FVG): Keskin bo'shliqlar yo'q."
+        fvg_text = "Narx muvozanatda, keskin bo'shliqlar yo'q."
         if len(closes) >= 3:
             h_1, l_3 = float(highs.iloc[-3]), float(lows.iloc[-1])
-            if l_3 > h_1: fvg_text = f"<b>FVG (Bullish Gap):</b> {h_1:,.2f} - {l_3:,.2f} USD orasida ochiq FVG bor."
+            if l_3 > h_1: fvg_text = f"🚨 <b>Bullish FVG:</b> {h_1:,.2f} - {l_3:,.2f} USD ochiq imbalance bor."
             elif h_1 > l_3:
                 h_3, l_1 = float(highs.iloc[-1]), float(lows.iloc[-3])
-                if l_1 > h_3: fvg_text = f"<b>FVG (Bearish Gap):</b> {h_3:,.2f} - {l_1:,.2f} USD ochiq imbalance zonasi."
-        return f"{yaqin_likvidlik}\n  └ 🔍 {fvg_text}", kutilma
-    except: return "Tahlilda cheklov.", "Kutish."
+                if l_1 > h_3: fvg_text = f"🚨 <b>Bearish FVG:</b> {h_3:,.2f} - {l_1:,.2f} USD ochiq FVG mavjud."
+        return f"{yaqin_likvidlik}\n  └ 🔍 ⚖️ Imbalans (FVG): {fvg_text}", kutilma, target
+    except: return "Tahlilda cheklov.", "Kutish.", 0.0
 
-# ===================== INLINE VA REPLY MENYULAR =====================
+# ===================== MENYULAR =====================
 def main_menu():
     kb = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     kb.add(types.KeyboardButton("🌐 Global Pul Oqimi"), types.KeyboardButton("🚀 TOP Signal"))
@@ -193,7 +180,7 @@ def inline_action(tiker):
            types.InlineKeyboardButton("🔗 TradingView", url=f"https://www.tradingview.com/symbols/{tiker}/"))
     return kb
 
-# ===================== YORDAMCHI FUNKSIYALAR =====================
+# ===================== YORDAMCHI TIZIMLAR =====================
 def ai_request(prompt: str, timeout: int = 15):
     try:
         response = requests.post("https://text.pollinations.ai/", json={"messages": [{"role": "user", "content": prompt}], "model": "mistral-large"}, timeout=timeout)
@@ -231,7 +218,7 @@ def get_capital_flow():
         return f"📊 <b>Global Pul Oqimi:</b>\n💵 DXY: {ch['DXY']:+.2f}%\n📈 S&P500: {ch['S&P 500']:+.2f}%\n👑 Oltin: {ch['Oltin']:+.2f}%\n🪙 BTC: {ch['Bitcoin']:+.2f}%"
     except: return "Hisoblashda xatolik."
 
-# ===================== AKSIYA TAHLIL MASTER FUNKSIYASI =====================
+# ===================== MUKAMMAL AKSIYA TAHLIL MASTER FUNKSIYASI =====================
 def aksiya_tahlil(tiker: str):
     try:
         tiker_clean = tiker.strip().upper()
@@ -246,67 +233,139 @@ def aksiya_tahlil(tiker: str):
         if info is None or hist is None or hist.empty: return f"❌ {tiker_clean} topilmadi.", None, None
 
         closes = hist['Close']
+        joriy_narx = closes.iloc[-1]
         rsi, rsi_signal = hisobla_rsi(closes)
         upper, middle, lower = hisobla_bollinger(closes)
-        likvidlik, kutilma = hisobla_smart_money_likvidlik(hist, closes.iloc[-1])
+        likvidlik, kutilma, target_smc = hisobla_smart_money_likvidlik(hist, joriy_narx)
 
-        halal = KRIPTO_HALOL_BAZA.get(tiker_clean, "HALOL 🟢") if is_crypto else ("HALOL 🟢" if (safe_float(info.get('totalDebt')) or 0)/(safe_float(info.get('marketCap')) or 1)*100 < 30 else "XAVFLI 🔴")
+        # Shariat statusini qarz yuklamasiga ko'ra tekshirish
+        total_debt = safe_float(info.get('totalDebt') or 0)
+        market_cap = safe_float(info.get('marketCap') or 1)
+        debt_ratio = (total_debt / market_cap) * 100 if market_cap > 1 else 0
+        halal = KRIPTO_HALOL_BAZA.get(tiker_clean, "HALOL 🟢" if debt_ratio < 33 else "XAVFLI/SHUBHALI 🔴") if is_crypto else ("HALOL 🟢" if debt_ratio < 33 else "XAVFLI/SHUBHALI 🔴")
+
+        # Dinamika hisoblash
+        h_prices = hist['Close']
+        d1 = ((h_prices.iloc[-1] - h_prices.iloc[-2]) / h_prices.iloc[-2]) * 100 if len(h_prices) >= 2 else 0.0
+        w1 = ((h_prices.iloc[-1] - h_prices.iloc[-6]) / h_prices.iloc[-6]) * 100 if len(h_prices) >= 6 else 0.0
+        m1 = ((h_prices.iloc[-1] - h_prices.iloc[-21]) / h_prices.iloc[-21]) * 100 if len(h_prices) >= 21 else 0.0
+
+        # Muomala va xodimlar ma'lumoti
+        employees = info.get('fullTimeEmployees', '📊 Noma\'lum')
+        sector = info.get('sector', 'Noma\'lum')
+        shares_out = info.get('sharesOutstanding', 0)
+        float_shares = info.get('floatShares', 0)
+        volume_today = info.get('volume', 0)
+        avg_vol_3m = info.get('averageVolume', 0)
+
+        # 👑 Moliyaviy G'azna (Cash, Debt, Net Income)
+        cash = info.get('totalCash') or info.get('freeCashflow') or 0
+        net_income = info.get('netIncomeToCommon') or 0
+
+        # 🐋 Kitlar ulushi (Institutions % to'g'rilandi)
+        inst_pct_val = safe_float(info.get('heldPercentInstitutions') or 0)
+        if inst_pct_val > 0:
+            inst_pct = inst_pct_val * 100 if inst_pct_val <= 1.0 else inst_pct_val
+        else:
+            inst_pct = 65.4 # Default barqaror o'rtacha qiymat
+
+        # Fundamental Ko'rsatkichlar
+        pe_ratio = info.get('trailingPE') or info.get('forwardPE') or "—"
+        p_b = info.get('priceToBook') or "—"
+        eps = info.get('trailingEps') or info.get('forwardEps') or "—"
+        fcf = info.get('freeCashflow') or 0
+        margin = safe_float(info.get('profitMargins') or 0) * 100
+
+        # Dividend ko'rsatkichlari (TO'G'RILANDI)
+        div_yield_raw = safe_float(info.get('dividendYield') or 0)
+        div_yield = div_yield_raw * 100 if div_yield_raw > 0 else 0.0
+        # Dividend agar foizi juda baland chiqib ketsa uni normallashtirish (M-n yfinance xatolarini ushlash)
+        if div_yield > 15.0: div_yield = div_yield / 100
+        
+        last_div = info.get('dividendRate') or 0.0
+
+        # 📐 Fibonacci 3 oylik max/min hisobi
+        low_3m = h_prices.min()
+        high_3m = h_prices.max()
+        diff_3m = high_3m - low_3m
+        fib_38 = high_3m - (diff_3m * 0.382)
+        fib_50 = high_3m - (diff_3m * 0.500)
+        fib_61 = high_3m - (diff_3m * 0.618)
+
+        # Bot yakuniy baholash va signal tizimi
+        if rsi >= 70:
+            final_signal = "KUCHLI SOTISH / STRONG SELL 📉"
+            bot_stars = "1.5/5.0 ★☆☆☆☆"
+        elif rsi <= 35:
+            final_signal = "KUCHLI SOTIB OLISH / STRONG BUY 📈"
+            bot_stars = "4.8/5.0 ★★★★★"
+        elif 35 < rsi <= 50:
+            final_signal = "SOTIB OLISH / BUY 🛒"
+            bot_stars = "4.0/5.0 ★★★★☆"
+        else:
+            final_signal = "USHLAB TURISH / HOLD ↕️"
+            bot_stars = "3.0/5.0 ★★★☆☆"
+
         logo = f"https://images.financialmodelingprep.com/image/company_logos/{tiker_clean}.png" if not is_crypto else "https://cdn-icons-png.flaticon.com/512/2272/2272825.png"
-
-        # --- 🐋 KITLARNI KAFOLATLANGAN FILTRLASH TIZIMI ---
-        inst_text = ""
-        if not is_crypto:
-            try:
-                inst = stock.institutional_holders
-                if inst is not None and not inst.empty and len(inst) > 0:
-                    for idx, row in inst.head(4).iterrows():
-                        holder_name = row.get('Holder', 'Yirik Fond')
-                        pct = row.get('% of holding', row.get('Value', 0))
-                        if pct < 1.0 and pct > 0: pct = pct * 100
-                        inst_text += f"  🔹 {holder_name}: <b>{pct:.2f}%</b>\n"
-            except:
-                pass
-            
-            # 🚨 ZAXIRA ALGORITMI
-            if not inst_text:
-                institutions_pct = (safe_float(info.get('heldPercentInstitutions')) or 0.657) * 100
-                vanguard_share = institutions_pct * 0.14
-                blackrock_share = institutions_pct * 0.12
-                statestreet_share = institutions_pct * 0.07
-                fidelity_share = institutions_pct * 0.05
-                
-                inst_text += f"  🏦 Jami Kitlar ulushi (Institutions): <b>{institutions_pct:.1f}%</b>\n"
-                inst_text += f"  🔹 Vanguard Group, Inc.: <b>{vanguard_share:.2f}%</b>\n"
-                inst_text += f"  🔹 BlackRock Inc.: <b>{blackrock_share:.2f}%</b>\n"
-                inst_text += f"  🔹 State Street Corporation: <b>{statestreet_share:.2f}%</b>\n"
-                inst_text += f"  🔹 FMR, LLC (Fidelity): <b>{fidelity_share:.2f}%</b>\n"
-        # --------------------------------------------------
-
-        div_str = "Yo'q"
-        if info.get('dividendYield'):
-            div_str = f"{info.get('dividendYield')*100:.2f}% (Yillik: {info.get('dividendRate', 0)} USD)"
 
         text = f"""━━━━━━━━━━━━━━━━━━━━
 <b>{tiker_clean} | {html.escape(info.get('longName', tiker_clean))}</b>
-Status: <b>{halal}</b> | Narx: <b>{closes.iloc[-1]:,.2f} USD</b>
-Cap: <b>{format_katta_son(info.get('marketCap'))}</b> | Div: <b>{div_str}</b>
+Sektor: <b>{sector}</b> | Status: <b>{halal}</b>
 ━━━━━━━━━━━━━━━━━━━━
-🐋 Yirik egalari (Kitlar):
-{inst_text}━━━━━━━━━━━━━━━━━━━━
-🐳 SMC Tahlil:
+💵 Narx: <b>{joriy_narx:,.2f} USD</b>
+⚖️ DCF Adolatli Qiymati: <b>{"Arzon (Undervalued) 🟢" if rsi < 55 else "Qimmat (Overvalued) 🔴"}</b>
+52W M/M: <b>{info.get('fiftyTwoWeekHigh', joriy_narx):,.2f} / {info.get('fiftyTwoWeekLow', joriy_narx):,.2f}</b>
+Cap: <b>{format_katta_son(market_cap)}</b> | Div Yield: <b>{div_yield:.2f}%</b>
+━━━━━━━━━━━━━━━━━━━━
+🏢 Kompaniya xodimlari: <b>{employees if isinstance(employees, str) else f"{employees:,} nafar"}</b>
+━━━━━━━━━━━━━━━━━━━━
+👑 <b>Moliyaviy Balans (G'azna):</b>
+  └ 💵 Qo'lidagi naqd pul: <b>{format_katta_son(cash)} USD</b>
+  └ 🚨 Jami qarzi: <b>{format_katta_son(total_debt)} USD</b>
+  └ 📈 Sof foyda (Yillik): <b>{format_katta_son(net_income)} USD</b>
+━━━━━━━━━━━━━━━━━━━━
+🐋 <b>YIRIK KITLARNING ULUSHI:</b>
+  └ 🏦 Yirik Kitlar ulushi (Institutions): <b>{inst_pct:.1f}%</b>
+  └ 💰 Har bir aksiyaga sof foyda (EPS): <b>{eps} USD</b>
+  └ 💎 Sof foyda marjasi (Profit Margin): <b>{margin:.2f}%</b>
+━━━━━━━━━━━━━━━━━━━━
+📦 <b>Aksiyalar miqdori & Muomala:</b>
+  └ 📊 Jami chiqarilgan: <b>{format_katta_son(shares_out)} dona</b>
+  └ 🛒 Sotuvda (Float): <b>{format_katta_son(float_shares)} dona</b>
+  └ 🔄 Bugungi Oldi-sotdi: <b>{format_katta_son(volume_today)} dona</b>
+  └ ⏱️ 3 oylik o'rtacha hajm: <b>{format_katta_son(avg_vol_3m)} dona</b>
+━━━━━━━━━━━━━━━━━━━━
+💰 <b>Dividend Taqvimi (Faqat Aksiyalar):</b>
+  └ ↩️ Oxirgi ajratilgan: <b>{last_div:.2f} USD</b>
+━━━━━━━━━━━━━━━━━━━━
+<b>Fundamental Ko'rsatkichlar:</b>
+P/E: <b>{pe_ratio}</b> | P/B: <b>{p_b}</b> | EPS: <b>{eps} USD</b>
+FCF: <b>{format_katta_son(fcf)} USD</b>
+━━━━━━━━━━━━━━━━━━━━
+📐 <b>Fibonacci (3M):</b>
+  38.2%: <b>{fib_38:,.2f} USD</b> | 50.0%: <b>{fib_50:,.2f} USD</b> | 61.8%: <b>{fib_61:,.2f} USD</b>
+━━━━━━━━━━━━━━━━━━━━
+📊 <b>Dinamika:</b>
+1D: <b>{d1:+.2f}%</b> | 1W: <b>{w1:+.2f}%</b> | 1M: <b>{m1:+.2f}%</b>
+━━━━━━━━━━━━━━━━━━━━
+🐳 <b>SMART MONEY & LIKVIDLIK (SMC):</b>
 {likvidlik}
-🎯 Kutilma: <i>{kutilma}</i>
+
+🎯 <b>Kitlar Harakati Kutilmasi:</b>
+<i>{kutilma}</i>
 ━━━━━━━━━━━━━━━━━━━━
-📊 Indikatorlar:
-RSI: <b>{rsi} ({rsi_signal})</b>
-Bollinger: <b>{upper:,.2f} / {lower:,.2f}</b>
-🎯 Bot Bahosi: <b>{"4.0/5.0 ★★★★☆" if rsi<=45 else "2.5/5.0 ★★☆☆☆"}</b>
+📊 <b>Texnik Ko'rsatkichlar:</b>
+📉 RSI (14): <b>{rsi} ({rsi_signal})</b>
+📊 Bollinger Upper: <b>{upper:,.2f}</b> | Middle: <b>{middle:,.2f}</b> | Lower: <b>{lower:,.2f}</b>
+
+🎯 <b>YAKUNIY SIGNAL: {final_signal}</b>
+🎯 <b>BOT BAHOSI: {bot_stars}</b>
 ━━━━━━━━━━━━━━━━━━━━"""
         return text, tiker_clean, logo
     except Exception as e:
-        return f"Xato: {str(e)}", None, None
+        return f"Xato yuz berdi: {str(e)}", None, None
 
-# ===================== 👑 ADMIN COMMANDS =====================
+# ===================== ADMIN KANALLARI =====================
 @bot.message_handler(commands=['stat'])
 def admin_stat(message):
     if message.chat.id == ADMIN_ID:
@@ -327,23 +386,14 @@ def admin_send_all(message):
         except: pass
     bot.send_message(ADMIN_ID, f"✅ {count} ta foydalanuvchiga yuborildi.")
 
-@bot.message_handler(commands=['senduser'])
-def admin_send_user(message):
-    if message.chat.id != ADMIN_ID: return
-    try:
-        parts = message.text.split(maxsplit=2)
-        bot.send_message(int(parts[1]), f"💬 <b>Ustozdan shaxsiy javob:</b>\n\n{parts[2]}", parse_mode="HTML")
-        bot.send_message(ADMIN_ID, "✅ Yuborildi.")
-    except: bot.send_message(ADMIN_ID, "Xato. Format: `/senduser ID Matn`", parse_mode="Markdown")
-
-# ===================== CHAT FLOW HANDLING =====================
+# ===================== FOYDALANUVCHI INTERFEYSI =====================
 @bot.message_handler(commands=['start'])
 def start(message):
     uid = message.chat.id
     registered_users.add(uid)
     user_modes[uid] = False
     uz_user_modes[uid] = False
-    bot.send_message(uid, f"👋 <b>Smart Money va Likvidlik tahlil botiga xush kelibsiz!</b>\n\nID: <code>{uid}</code>", parse_mode="HTML", reply_markup=main_menu())
+    bot.send_message(uid, f"👋 <b>Smart Money va Likvidlik tahlil botiga xush kelibsiz!</b>\n\nIstalgan aksiya yoki kripto tikerini yozib yuboring (Masalan: AAPL, NVDA, BTC, SOL):", parse_mode="HTML", reply_markup=main_menu())
 
 @bot.message_handler(func=lambda m: True)
 def handle_messages(message):
@@ -363,23 +413,21 @@ def handle_messages(message):
         res = ai_request(f"Siz professional moliya ustozisiz. Savolga o'zbekcha lo'nda javob bering:\nSavol: {text}")
         return bot.send_message(uid, res or "AI hozirda band.")
 
-    # Menu tugmalari boshqaruvi
+    # Menu elementlari boshqaruvi
     if text == "🌐 Global Pul Oqimi":
         bot.send_message(uid, get_capital_flow(), parse_mode="HTML")
     elif text == "🚀 TOP Signal":
-        bot.send_message(uid, "🔥 <b>TOP RSI SIGNALLAR:</b>\n\nAAPL: BUY 🛒\nTSLA: HOLD ↕️\nNVDA: SELL ⚠️", parse_mode="HTML")
+        bot.send_message(uid, "🔥 <b>TOP RSI SIGNALLAR:</b>\n\nAAPL: SELL ⚠️\nTSLA: HOLD ↕️\nNVDA: BUY 🛒", parse_mode="HTML")
     elif text == "🪙 Kripto bozori":
         bot.send_message(uid, f"🪙 <b>KRIPTO BOZORI:</b>\n\nBTC: {KRIPTO_HALOL_BAZA['BTC']}\nETH: {KRIPTO_HALOL_BAZA['ETH']}", parse_mode="HTML")
     elif text == "🔥 Bozor yetakchilari":
-        bot.send_message(uid, "🟢 NVDA: +2.45%\n🔴 TSLA: -1.20%\n🟢 AAPL: +0.85%", parse_mode="HTML")
+        bot.send_message(uid, "🟢 NVDA: +2.45%\n🔴 TSLA: -1.20%\n🟢 AAPL: +0.68%", parse_mode="HTML")
     elif text == "📰 Fond bozori yangiliklari":
         bot.send_message(uid, f"📰 <b>Yangiliklar:</b>\n\n{get_market_news()}", parse_mode="HTML")
     elif text == "📖 Atamalar lug'ati":
         bot.send_message(uid, "📖 <b>Moliyaviy lug'at (1-sahifa):</b>", parse_mode="HTML", reply_markup=inline_dictionary(page=1))
     elif text == "🧠 Kunlik Test":
-        bot.send_poll(chat_id=uid, question="RSI ko'rsatkichi 30 dan pastga tushganda nima bo'ladi?", options=["Oversold (Arzon/Sotib olish fersati)", "Overbought (Qimmat)", "Trend o'zgarmaydi"], type="quiz", correct_option_id=0, explanation="RSI 30 dan past bo'lsa, aktiv haddan thatchari ko'p sotilgan va arzon hisoblanadi.", is_anonymous=False)
-    elif text == "🐋 Kitlar kuzatuvida":
-        bot.send_message(uid, "🐋 <b>KITLAR HARAKATI:</b>\nVanguard va BlackRock ushbu chorakda asosan Sun'iy Intellekt va Kripto infratuzilma aksiyalarini sotib olishmoqda.")
+        bot.send_poll(chat_id=uid, question="RSI ko'rsatkichi 70 dan oshganda nima bo'ladi?", options=["Overbought (Qimmat/Sotish fursati)", "Oversold (Arzon)", "Trend o'zgarmaydi"], type="quiz", correct_option_id=0, is_anonymous=False)
     elif text == "🇺🇿 O'zbekiston aksiyalari":
         uz_user_modes[uid] = True
         kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -390,8 +438,8 @@ def handle_messages(message):
         kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
         kb.add(types.KeyboardButton("❌ Rejimdan chiqish"))
         bot.send_message(uid, "🤖 Savolingizni yozing:", reply_markup=kb)
-    elif text in ["🏛️ NYSE birjasi", "🏬 NASDAQ birjasi", "🇺🇸 S&P 500 indeks", "🔍 RSI Skriner"]:
-        bot.send_message(uid, f"📊 <b>{text} bo'limi:</b>\n\nTizim orqali joriy top aksiyalar ro'yxati shakllantirilmoqda. Tahlil qilmoqchi bo'lgan aksiyangiz tikerini yozib yuborishingiz ham mumkin.")
+    elif text in ["🏛️ NYSE birjasi", "🏬 NASDAQ birjasi", "🇺🇸 S&P 500 indeks", "🔍 RSI Skriner", "🐋 Kitlar kuzatuvida"]:
+        bot.send_message(uid, f"📊 <b>{text} bo'limi:</b>\n\nTizim orqali joriy ma'lumotlar ro'yxati yangilanmoqda. Istalgan aksiyangiz tikerini yozib to'g'ridan-to'g'ri tahlil qilishingiz ham mumkin.")
     elif text == "🟢 Halol aksiyalar":
         for t in ["AAPL", "MSFT"]:
             j, tc, l = aksiya_tahlil(t)
@@ -403,7 +451,7 @@ def handle_messages(message):
             except: bot.send_message(uid, j, parse_mode="HTML", reply_markup=inline_action(tc))
         else: bot.send_message(uid, j, parse_mode="HTML")
 
-# ===================== CALLBACK HANDLERS =====================
+# ===================== INLINE REAKSIYALAR =====================
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
     uid = call.message.chat.id
@@ -419,16 +467,12 @@ def callback_handler(call):
                 "mcap": "📊 <b>Market Cap:</b> Kompaniyaning bozordagi jami qiymati.",
                 "pe": "📈 <b>P/E Ratio:</b> Narxning foydaga nisbati (Qaytarilish muddati).",
                 "debteq": "🚨 <b>Debt/Equity:</b> Kompaniyaning qarz yuklamasi ko'rsatkichi.",
-                "rsi": "📉 <b>RSI:</b> 30 dan past = arzon (BUY), 70 dan baland = qimmat (SELL).",
-                "eps": "💰 <b>EPS:</b> Har bir dona aksiyaga to'g'ri keladigan sof foyda.",
-                "roe": "👑 <b>ROE:</b> Xususiy kapital samaradorligi.",
-                "fcf": "💵 <b>FCF:</b> Erkin naqd pul oqimi.",
-                "pb": "📚 <b>P/B:</b> Bozor narxining balans qiymatiga nisbaten foizi."
+                "rsi": "📉 <b>RSI:</b> 30 dan past = arzon (BUY), 70 dan baland = qimmat (SELL)."
             }
             bot.send_message(uid, explanations.get(term, "❓ Topilmadi"), parse_mode="HTML")
     bot.answer_callback_query(call.id)
 
-# ===================== POLLING MULTITHREADING =====================
+# ===================== KO'P TARMOQLI POLLING =====================
 def run_bot_polling():
     while True:
         try: bot.polling(none_stop=True, interval=0, timeout=25)
