@@ -7,7 +7,7 @@ from telebot import types
 import yfinance as yf
 from flask import Flask
 
-# 1. RENDER UCHUN FLASK SERVER (Doimiy ACTIVE holatda saqlash uchun)
+# 1. RENDER UCHUN FLASK SERVER
 app = Flask('')
 
 @app.route('/')
@@ -25,25 +25,24 @@ flask_thread = threading.Thread(target=run_flask)
 flask_thread.daemon = True
 flask_thread.start()
 
-# 2. TELEGRAM BOT TOKENI VA ULANISHINI SOZLASh
+# 2. TELEGRAM BOT ULANISHI
 TOKEN = "8781183838:AAEcHw_5d0rDnLFmA07pGFO7y4Uh8ZRTeg8"
 bot = telebot.TeleBot(TOKEN)
 
-# Eski webhook to'qnashuvlarini tozalash (Conflict xatosiga qarshi)
 try:
     bot.remove_webhook()
     time.sleep(1)
 except:
     pass
 
-# YAHOO FINANCE ORQALI REAL VAQT REJIMIDAGI TAHLIL
+# GLOBAL AKSIYA TAHLIL FUNKSIYASI (Yahoo Finance)
 def get_stock_analysis(ticker_symbol):
     ticker_symbol = ticker_symbol.upper().strip()
     try:
         ticker = yf.Ticker(ticker_symbol)
         info = ticker.info
         if not info or 'longName' not in info:
-            return None, "Yahoo Finance ma'lumot berishni chekladi yoki tiker xato."
+            return None, "Yahoo Finance ma'lumot berishni chekladi."
     except Exception as e:
         return None, f"Ulanish xatosi: {str(e)}"
 
@@ -68,7 +67,7 @@ def get_stock_analysis(ticker_symbol):
         div_yield = info.get('dividendYield', 0)
         div_yield_pct = f"{round(div_yield * 100, 2)}%" if div_yield else "0.00%"
     except Exception as e:
-        return None, f"Ma'lumotni qayta ishlashda xato: {str(e)}"
+        return None, f"Ma'lumotni ishlashda xato: {str(e)}"
 
     high_52w = info.get('fiftyTwoWeekHigh', narx)
     low_52w = info.get('fiftyTwoWeekLow', narx)
@@ -93,7 +92,7 @@ def get_stock_analysis(ticker_symbol):
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"🐋 YIRIK KITLAR:\n"
         f"  └ 🏦 Jami ulushi: {kitlar_jami}\n"
-        f"    🔹 Blackrock Inc. -> Tizimli xarid\n"
+        f"    🔹 Blackrock Inc. -> Faol xarid\n"
         f"    🔹 Vanguard Group -> Ulush barqaror\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"📦 Aksiyalar miqdori:\n"
@@ -118,7 +117,7 @@ def get_stock_analysis(ticker_symbol):
     )
     return text, None
 
-# 3. ASOSIY ENYUG TUGMALARI (Ketma-ket tartiblangan)
+# 3. INTERFEYS TUGMALARI
 def main_keyboard():
     markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     markup.add(
@@ -136,18 +135,18 @@ def main_keyboard():
 def send_welcome(message):
     bot.send_message(
         message.chat.id, 
-        "👋 <b>Aksiya Halol Pro tizimiga xush kelibsiz!</b>\n\nTahlil qilmoqchi bo'lgan xalqaro aksiya tikerini kiriting (Masalan: <code>TSCO</code>, <code>AAPL</code>) yoki quyidagi menyu bo'limlaridan birini tanlang:", 
+        "👋 <b>Aksiya Halol Pro tizimiga xush kelibsiz!</b>\n\nTahlil qilmoqchi bo'lgan xalqaro aksiya tikerini kiriting (Masalan: <code>TSCO</code>) yoki quyidagi menyu bo'limlaridan birini tanlang:", 
         reply_markup=main_keyboard(),
         parse_mode="HTML"
     )
 
-# 4. MATNLAR VA MASLAHATLAR INTERAKTIV ISHLOVCHI QISMI
+# 4. CHURKURLASHTIRILGAN ISHCHI FUNKSIYALAR (TUGMALAR ALOHIDA AJRATILDI)
 @bot.message_handler(func=lambda message: True)
 def handle_all_messages(message):
     text = message.text.strip()
     chat_id = message.chat.id
 
-    # A) UZBEKISTAN BO'LIMI
+    # 1. UZBEKISTAN BO'LIMI
     if text == "🇺🇿 Uzbekistan":
         uzb_msg = (
             "🇺🇿 <b>Toshkent Respublika Fond Birjasi (TSE) Tahlili:</b>\n\n"
@@ -159,8 +158,9 @@ def handle_all_messages(message):
             "💡 <i>Tavsiya: Mahalliy aksiyalar hisobotlarini 'Kapital Depozit' ilovalari orqali monitoring qilish tavsiya etiladi.</i>"
         )
         bot.send_message(chat_id, uzb_msg, parse_mode="HTML")
+        return # Funksiyani shu yerda to'xtatamiz, pastga o'tib ketmasligi uchun
 
-    # B) LUG'AT BO'LIMI
+    # 2. LUG'AT BO'LIMI (ENDI ANIQ ISHLAYDI)
     elif text == "📖 Ko'rsatkichlar Lug'ati":
         dict_msg = (
             "📖 <b>Professional Fundamental Ko'rsatkichlar Lug'ati:</b>\n\n"
@@ -171,8 +171,9 @@ def handle_all_messages(message):
             "🔹 <b>SMC (Smart Money Concepts):</b> Yirik kitlar va banklarning order qoldirgan liquidity (likvidlik) va FVG zonalarini aniqlash strategiyasi."
         )
         bot.send_message(chat_id, dict_msg, parse_mode="HTML")
+        return
 
-    # C) S&P 500 FONDLARI
+    # 3. S&P 500 FONDLARI (ENDI ANIQ ISHLAYDI)
     elif text == "📈 S&P 500 Fondlari":
         sp_msg = (
             "📈 <b>S&P 500 Indeksiga asoslangan eng likvidli ETF fondlar:</b>\n\n"
@@ -183,12 +184,13 @@ def handle_all_messages(message):
             "💡 <i>Ushbu tikerlardan birini (Masalan: <code>VOO</code>) botga to'g'ridan-to'g'ri matn sifatida yuborsangiz, uning moliyaviy balansini va tarkibini jonli tahlil qilib beraman!</i>"
         )
         bot.send_message(chat_id, sp_msg, parse_mode="HTML")
+        return
 
-    # D) JONLI HALOL AKSIYALAR FILTRI (Emojilar bilan)
+    # 4. JONLI HALOL AKSIYALAR FILTRI
     elif text == "🟢 Halol aksiyalar":
         halol_msg = (
             "🟢 <b>Islom Moliyasi Standartlariga Mos Top Aksiyalar (AAOIFI):</b>\n\n"
-            "🍏 <code>AAPL</code> - Apple Inc. (Texnologiya va ekotizim)\n"
+            "🍏 <code>AAPL</code> - Apple Inc. (Texnologiya)\n"
             "🟢 <code>NVDA</code> - NVIDIA Corporation (AI va chiplar)\n"
             "🛒 <code>TSCO</code> - Tractor Supply Company (Chakana savdo)\n"
             "💾 <code>MU</code> - Micron Technology (Yarimo'tkazgichlar)\n"
@@ -196,8 +198,9 @@ def handle_all_messages(message):
             "💡 <i>Ushbu ro'yxatdagi istalgan tiker ustiga bosib, nusxalab botga yuboring va uning joriy narxlari hamda Fibonacci nuqtalarini ko'ring!</i>"
         )
         bot.send_message(chat_id, halol_msg, parse_mode="HTML")
+        return
 
-    # E) RSI SKRINER
+    # 5. RSI SKRINER
     elif text == "🔍 RSI Skriner":
         rsi_msg = (
             "🔍 <b>RSI Skriner - Haddan tashqari sotilgan (Arzonlashgan) Zonalar:</b>\n\n"
@@ -207,18 +210,20 @@ def handle_all_messages(message):
             "🎯 <i>Ushbu aktivlar hozirda texnik jihatdan eng arzon zonalarda joylashgan.</i>"
         )
         bot.send_message(chat_id, rsi_msg, parse_mode="HTML")
+        return
 
-    # F) AI TAVSIYALARI
+    # 6. AI TAVSIYALARI
     elif text == "🤖 AI Tavsiyalari":
         ai_msg = (
             "🤖 <b>AI Algoritmik Bozor Sharhi:</b>\n\n"
             "🚨 <b>Trend yo'nalishi:</b> Texnologiya sektori (AI va Yarimo'tkazgichlar) vaqtinchalik korreksiyada, bu uzoq muddatli investorlar uchun FVG (Fair Value Gap) hududlarida pozitsiya yig'ishga imkon beradi.\n"
-            "🎯 <b>Diqqat markazida:</b> Chakana savdo va barqaror iste'mol mollari (Consumer Defensive) sektorlariga pul oqimi (Institutional Flow) ko'paymoqda.\n\n"
+            "🎯 <b>Diqqat markazida:</b> Chakana savdo va barqaror iste'mol mollari (Consumer Defensive) sektorlariga pul oqimi ko'paymoqda.\n\n"
             "🎛 Tahlil o'tkazish uchun biror bir tikerni yozing."
         )
         bot.send_message(chat_id, ai_msg, parse_mode="HTML")
+        return
 
-    # G) TOP SIGNAL
+    # 7. TOP SIGNAL
     elif text == "🚀 TOP Signal":
         signal_msg = (
             "🚀 <b>Kunlik Yuqori Ehtimollikdagi Texnik Signal:</b>\n\n"
@@ -229,8 +234,9 @@ def handle_all_messages(message):
             "⚠️ <i>Eslatma: Ushbu ma'lumot moliyaviy maslahat emas, shaxsiy tahlil hisoblanadi! Riskni boshqarish majburiydir.</i>"
         )
         bot.send_message(chat_id, signal_msg, parse_mode="HTML")
+        return
 
-    # H) FOYDALANUVCHI AKSIYA NOMINI YOZGAN HOLATDA
+    # 8. AGAR TUGMA BO'LMASA — FOYDALANUVCHI AKSIYA NOMINI YOZGAN DEB HISOBLAYMIZ
     else:
         if len(text) <= 5 and text.replace('.', '').isalpha():
             status_msg = bot.send_message(chat_id, f"🔍 <code>{text.upper()}</code> aksiyasi real vaqt rejimida tahlil qilinmoqda, kuting...")
@@ -265,7 +271,6 @@ def callback_ai(call):
         parse_mode="HTML"
     )
 
-# 6. CRITICAL POLLING MODE (Renderda xatosiz ishlash kafolati)
 if __name__ == "__main__":
     print("Bot muvaffaqiyatli yondi!")
     bot.polling(none_stop=True, interval=0, timeout=20)
