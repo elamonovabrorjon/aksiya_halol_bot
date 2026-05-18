@@ -167,7 +167,57 @@ def get_current_ratio_status(val):
         else: return f"{f} 🔴 (Mablag' yetishmovchiligi xavfi)"
     except: return f"{val} ⚪"
 
-# 18 TA KO'RSATKICH TO'LIQ SIG'DIRILGAN METOD
+# IPO SANASINI XAVFSIZ QIDIRISH
+def get_ipo_date_safely(ticker_obj):
+    try:
+        info = ticker_obj.info
+        if 'genesisDate' in info and info['genesisDate']:
+            ts = int(info['genesisDate'])
+            return datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d')
+    except:
+        pass
+    try:
+        first_trade = ticker_obj.history(period="max")
+        if not first_trade.empty:
+            return str(first_trade.index[0].strftime('%Y-%m-%d'))
+    except:
+        pass
+    return "Yo'q ⚪"
+
+# JONLI KRIPTO VA YETAKCHILARNI TORTISH METODLARI
+def get_live_crypto_prices():
+    cryptos = {"BTC-USD": "🪙 Bitcoin (BTC)", "ETH-USD": "🔷 Ethereum (ETH)", "SOL-USD": "☀️ Solana (SOL)", "BNB-USD": "🔶 Binance Coin (BNB)"}
+    text = "🪙 <b>Jonli Kripto Bozori Kurslari:</b>\n━━━━━━━━━━━━━━━━━━━━\n"
+    for ticker, name in cryptos.items():
+        try:
+            t = yf.Ticker(ticker)
+            price = t.info.get('regularMarketPrice', t.info.get('currentPrice', 0.0))
+            change = t.info.get('regularMarketChangePercent', 0.0)
+            icon = "📈 🟢" if change >= 0 else "📉 🔴"
+            text += f"{name}:\n💰 Narx: <b>{round(price, 2)} USD</b> ({icon} {round(change, 2)}%)\n"
+        except:
+            text += f"{name}: Hozircha yuklab bo'lmadi ⚪\n"
+        text += "------------------------------------\n"
+    text += "━━━━━━━━━━━━━━━━━━━━"
+    return text
+
+def get_live_market_leaders():
+    leaders = {"NVDA": "Nvidia", "AAPL": "Apple", "MSFT": "Microsoft", "GOOG": "Google"}
+    text = "🔥 <b>Bozor Yetakchilari (Top Aksiyalar):</b>\n━━━━━━━━━━━━━━━━━━━━\n"
+    for ticker, name in leaders.items():
+        try:
+            t = yf.Ticker(ticker)
+            price = t.info.get('currentPrice', t.info.get('regularMarketPrice', 0.0))
+            change = t.info.get('regularMarketChangePercent', 0.0)
+            icon = "🟢" if change >= 0 else "🔴"
+            text += f"🏢 <b>{ticker} ({name})</b>\n└ Narx: <b>{price} USD</b> | Sutkalik: {icon} {round(change, 2)}%\n"
+        except:
+            text += f"🏢 <b>{ticker} ({name})</b>: Ma'lumot yuklanmadi ⚪\n"
+        text += "------------------------------------\n"
+    text += "━━━━━━━━━━━━━━━━━━━━"
+    return text
+
+# 18 TA KO'RSATKICH + IPO SANASI INTEGRATSIYASI
 def get_stock_analysis(ticker_symbol):
     ticker_symbol = ticker_symbol.upper().strip()
     
@@ -176,6 +226,7 @@ def get_stock_analysis(ticker_symbol):
     price = 0.0
     low52, high52 = 0.0, 0.0
     market_cap = "Yo'q"
+    ipo_date = "Yo'q ⚪"
     
     cash, debt, net_income = "Yo'q", "Yo'q", "Yo'q"
     shares_outstanding, float_shares, volume = "Yo'q", "Yo'q", "Yo'q"
@@ -199,6 +250,8 @@ def get_stock_analysis(ticker_symbol):
         low52 = info.get('fiftyTwoWeekLow', 0.0)
         high52 = info.get('fiftyTwoWeekHigh', 0.0)
         if info.get('marketCap'): market_cap = f"{round(info['marketCap']/1e9, 2)} B"
+        
+        ipo_date = get_ipo_date_safely(ticker)
         
         if info.get('totalCash'): cash = f"{round(info['totalCash']/1e9, 2)} B USD"
         if info.get('totalDebt'): debt = f"{round(info['totalDebt']/1e9, 2)} B USD"
@@ -246,13 +299,13 @@ def get_stock_analysis(ticker_symbol):
     bsl = round(price * 1.15, 2)
     dcf_status = "Arzon (Undervalued) 🟢" if real_rsi < 45 else "Adolatli baholangan 🟡"
 
-    # 18 TA KO'RSATKICHNING BIRORTASI HAM TUSHIB QOLMAGAN HOLATDA MATN:
     text = (
         f"🚨 <b>Aksiya Halol Bot:</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"🏢 <b>{ticker_symbol} | {comp_name}</b>\n"
         f"Sektor: {sector} | Status: <b>HALOL 🟢</b>\n"
         f"Bozor holati: <b>{bozor_holati}</b>\n"
+        f"📅 IPO Sanasi: <b>{ipo_date}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"💵 Narx: <b>{price} USD</b>\n"
         f"⚖️ DCF Adolatli Qiymati: <b>{dcf_status}</b>\n"
@@ -367,7 +420,7 @@ def main_keyboard():
 def send_welcome(message):
     bot.send_message(
         message.chat.id, 
-        "👋 <b>Aksiya Halol Pro Terminaliga xush kelibsiz!</b>\n\nTiker kiriting (Masalan: AVGO, TSCO):", 
+        "👋 <b>Aksiya Halol Pro Terminaliga xush kelibsiz!</b>\n\nTiker kiriting:", 
         reply_markup=main_keyboard(),
         parse_mode="HTML"
     )
@@ -383,9 +436,25 @@ def handle_all_messages(message):
         bot.send_message(chat_id, "🔍 <b>RSI Bo'yicha arzonlashganlar:</b> PYPL, TSCO, NKE", parse_mode="HTML")
     elif text == "📖 Atamalar lug'ati":
         bot.send_message(chat_id, "📖 <b>Moliyaviy tahlil lug'ati (1-sahifa):</b>", reply_markup=get_dictionary_keyboard(1), parse_mode="HTML")
+    
+    # ISHLAMAY QOLGAN TUGMALAR FIX ETILDI
+    elif text == "🪙 Kripto bozori":
+        status_msg = bot.send_message(chat_id, "🪙 Kriptovalyuta kurslari jonli tortilmoqda...")
+        crypto_text = get_live_crypto_prices()
+        try: bot.delete_message(chat_id, status_msg.message_id)
+        except: pass
+        bot.send_message(chat_id, crypto_text, parse_mode="HTML")
+        
+    elif text == "🔥 Bozor yetakchilari":
+        status_msg = bot.send_message(chat_id, "🔥 Bozor yetakchilari aksiyalari tahlil qilinmoqda...")
+        leaders_text = get_live_market_leaders()
+        try: bot.delete_message(chat_id, status_msg.message_id)
+        except: pass
+        bot.send_message(chat_id, leaders_text, parse_mode="HTML")
+        
     else:
         if len(text) <= 5 and text.replace('.', '').isalpha():
-            status_msg = bot.send_message(chat_id, f"🔍 <code>{text.upper()}</code> bo'yicha 18 ta ko'rsatkich va SMC tahlili hisoblanmoqda...")
+            status_msg = bot.send_message(chat_id, f"🔍 <code>{text.upper()}</code> tahlil qilinmoqda...")
             analysis_result = get_stock_analysis(text)
             try: bot.delete_message(chat_id, status_msg.message_id)
             except: pass
@@ -407,7 +476,7 @@ def callback_router(call):
     
     if data.startswith('ai_'):
         ticker = data.split('_')[1]
-        bot.send_message(chat_id, f"🤖 <b>AI Ekspert xulosasi ({ticker}):</b> 18 ta fundamental algoritm va 3 oylik Fibonacci sathlari hisobga olindi. SMC zonalariga muvofiq savdo rejasini tuzishingiz mumkin.", parse_mode="HTML")
+        bot.send_message(chat_id, f"🤖 <b>AI Ekspert xulosasi ({ticker}):</b> IPO sanasi va barcha 18 ta fundamental parametr muvaffaqiyatli integratsiya qilindi.", parse_mode="HTML")
 
 if __name__ == "__main__":
     bot.polling(none_stop=True, interval=0, timeout=20)
