@@ -1,24 +1,17 @@
-import asyncio
-import logging
+import time
 from datetime import datetime
 from threading import Thread
-from flask import Flask  # Render o'chirib qo'ymasligi uchun kerak
+from flask import Flask
 import yfinance as yf
 import requests
 from bs4 import BeautifulSoup
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+import telebot  # Render o'rnatgan kutubxonaga o'tdik!
 
-# TOKENNI TO'G'RIDAN-TO'G'RI SHU YERGA QO'YDIDIK (Hech qanday config.py shart emas!)
+# Tokenni to'g'ridan-to'g'ri shu yerga qo'ydik
 BOT_TOKEN = "8781183838:AAEcHw_5d0rDnLFmA07pGFO7y4Uh8ZRTeg8"
+bot = telebot.TeleBot(BOT_TOKEN)
 
-logging.basicConfig(level=logging.INFO)
-
-bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher()
-
-# Render tarmog'ida bot o'chib qolmasligi uchun Flask server quvuri
+# Render o'chib qolmasligi uchun Flask server
 app = Flask('')
 
 @app.route('/')
@@ -26,11 +19,10 @@ def home():
     return "UFinanz Terminal Bot is Alive!"
 
 def run_flask():
-    # Render avtomatik port ajratadi (0.0.0.0:10000)
     app.run(host='0.0.0.0', port=10000)
 
 # =====================================================================
-# SEANSLARNI HISOBLASH MANTIQI (Toshkent vaqti bilan)
+# SEANSLARNI HISOBLASH MANTIQI
 # =====================================================================
 def get_market_status():
     now = datetime.now()
@@ -43,10 +35,10 @@ def get_market_status():
     us_start, us_end = 18 * 60 + 30, 1 * 60
 
     if weekday in [5, 6]:
-        return f"⚠️ **Dam olish kuni!**\n🇺🇿 UzSE va 🇺🇸 AQSH birjalari yopiq.\n⏳ Bozorlar dushanba kuni soat 10:00 da ochiladi."
+        return "⚠️ **Dam olish kuni!**\n🇺🇿 UzSE va 🇺🇸 AQSH birjalari yopiq.\n⏳ Bozorlar dushanba kuni soat 10:00 da ochiladi."
 
     status_report = ""
-    # UzSE (Toshkent Birjasi)
+    # UzSE
     if uzse_start <= now_in_minutes < uzse_end:
         rem_min = uzse_end - now_in_minutes
         status_report += f"🇺🇿 **UzSE Bozor:** OCHIQ 🟢\n🛑 Yopilishiga: **{rem_min // 60} soat, {rem_min % 60} minut** qoldi.\n"
@@ -56,7 +48,7 @@ def get_market_status():
         status_report += f"⏳ Seansgacha: **{rem_min // 60} soat, {rem_min % 60} minut** qoldi.\n"
 
     status_report += "━━━━━━━━━━━━━━━━━━━━\n"
-    # AQSH (NYSE/NASDAQ)
+    # AQSH
     is_us_open = now_in_minutes >= us_start or now_in_minutes < us_end
     if is_us_open:
         rem_min = (24 * 60 - now_in_minutes) + us_end if now_in_minutes >= us_start else us_end - now_in_minutes
@@ -72,46 +64,32 @@ def get_market_status():
     return status_report
 
 # =====================================================================
-# 1. MEGA TERMINAL KLASSI
+# MEGA TERMINAL KLASSI
 # =====================================================================
 class MegaTerminal:
     def __init__(self, ticker, data):
         self.ticker = ticker.upper()
         self.data = data
 
-    def get_audit(self):
-        score = self._calculate_score()
-        fib = self._get_fibonacci()
-        whales = [
-            {"name": "Blackrock Inc.", "action": "+2.4% Xarid"},
-            {"name": "Vanguard Group", "action": "+1.8% Xarid"}
-        ]
-        return {
-            "score": score, "fib": fib, "whales": whales,
-            "status": "HALOL 🟢" if self.data.get('is_halol', True) else "XAVFLI 🔴"
-        }
-
     def _calculate_score(self):
-        s = 0
         try:
+            s = 0
             s += (5 if float(self.data.get('roe', 0)) > 15 else 1) * 0.3
             s += (5 if float(self.data.get('debt_equity', 100)) < 50 else 1) * 0.3
             s += (5 if float(self.data.get('profit_margin', 0)) > 10 else 1) * 0.4
-        except: s = 3.5
-        return round(s, 1)
+            return round(s, 1)
+        except: return 3.5
 
     def _get_fibonacci(self):
         try:
             low, high = float(self.data['low_52']), float(self.data['high_52'])
             diff = high - low
-            return {
-                "38.2%": round(high - (diff * 0.382), 2),
-                "61.8%": round(high - (diff * 0.618), 2)
-            }
+            return {"38.2%": round(high - (diff * 0.382), 2), "61.8%": round(high - (diff * 0.618), 2)}
         except: return {"38.2%": 0, "61.8%": 0}
 
     def generate_report(self):
-        res = self.get_audit()
+        score = self._calculate_score()
+        fib = self._get_fibonacci()
         time_status = get_market_status()
         
         report = f"==================================\n"
@@ -119,8 +97,8 @@ class MegaTerminal:
         report += f"==================================\n"
         report += f"🕒 **Bozorlar Holati:**\n{time_status}\n"
         report += f"==================================\n"
-        report += f"🎯 **UFinanz Fundamental Ball:** {res['score']}/5.0\n"
-        report += f"🛡️ **Shariat Status:** {res['status']}\n\n"
+        report += f"🎯 **UFinanz Fundamental Ball:** {score}/5.0\n"
+        report += f"🛡️ **Shariat Status:** HALOL 🟢\n\n"
         
         report += f"💵 **Narx:** {self.data.get('price')} USD\n"
         report += f"📊 P/E Ratio: {self.data.get('pe')} | P/B: {self.data.get('pb')}\n"
@@ -128,17 +106,16 @@ class MegaTerminal:
         report += f"💰 Div Yield: {self.data.get('div_yield')}%\n\n"
         
         report += f"📐 **FIBONACCI LEVELS (52-W):**\n"
-        report += f" ├ 38.2% Level: {res['fib']['38.2%']}\n"
-        report += f" └ 61.8% (Golden Pocket): {res['fib']['61.8%']}\n\n"
+        report += f" ├ 38.2% Level: {fib['38.2%']}\n"
+        report += f" └ 61.8% (Golden Pocket): {fib['61.8%']}\n\n"
         
         report += f"🐋 **YIRIK KITLAR (SMART MONEY):**\n"
-        for w in res['whales']:
-            report += f" └ 🏦 {w['name']}: {w['action']} 📈\n"
-            
+        report += f" ├ 🏦 Blackrock Inc.: +2.4% Xarid 📈\n"
+        report += f" └ 🏦 Vanguard Group: +1.8% Xarid 📈\n"
         return report
 
 # =====================================================================
-# 2. DATA UTILS
+# MA'LUMOTLARNI YUKLASH TIZIMI
 # =====================================================================
 def fetch_global_data(ticker):
     try:
@@ -156,8 +133,7 @@ def fetch_global_data(ticker):
             'debt_equity': info.get('debtToEquity', 0) if info.get('debtToEquity') else 100,
             'profit_margin': round(info.get('profitMargins', 0) * 100, 1) if info.get('profitMargins') else 0,
             'low_52': info.get('fiftyTwoWeekLow', 0),
-            'high_52': info.get('fiftyTwoWeekHigh', 0),
-            'is_halol': True
+            'high_52': info.get('fiftyTwoWeekHigh', 0)
         }
     except: return None
 
@@ -173,58 +149,55 @@ def fetch_uzse_data(ticker):
         
         name = name_tag.text.strip() if name_tag else f"{ticker.upper()} aksiyasi"
         price = price_tag.text.strip() if price_tag else "Narx topilmadi"
-        
         return f"🏢 **{name} (UzSE)**\n💰 Narxi: {price} UZS\n🟢 Bozor: Toshkent Fond Birjasi"
     except: return None
 
 # =====================================================================
-# 3. TELEGRAM BOT HANDLERLARI
+# BOT KOMANDALARI
 # =====================================================================
-@dp.message(Command("start"))
-async def start_cmd(message: types.Message):
-    await message.answer("🇺🇿 **UFinanz Terminal Botiga xush kelibsiz!**\nTahlil tikerini kiriting (AAPL, NVDA, UZMK):")
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    bot.reply_to(message, "🇺🇿 **UFinanz Terminal Botiga xush kelibsiz!**\nTahlil tikerini kiriting (AAPL, NVDA, UZMK):")
 
-@dp.message()
-async def handle_ticker(message: types.Message):
+@bot.message_handler(func=lambda message: True)
+def handle_stock(message):
     ticker = message.text.strip().upper()
-    await message.answer("🔄 Bozorlar tahlil qilinmoqda...")
+    status_msg = bot.reply_to(message, "🔄 Bozorlar tahlil qilinmoqda...")
     
+    # 1. UzSE tekshirish
     uz_data = fetch_uzse_data(ticker)
     if uz_data:
-        await message.answer(uz_data)
+        bot.edit_message_text(uz_data, chat_id=message.chat.id, message_id=status_msg.message_id, parse_mode="Markdown")
         return
 
+    # 2. Global bozorni tekshirish
     raw_data = fetch_global_data(ticker)
     if raw_data:
         terminal = MegaTerminal(ticker, raw_data)
         report_text = terminal.generate_report()
         
-        builder = InlineKeyboardBuilder()
-        builder.add(types.InlineKeyboardButton(text="🧡 Seeking Alpha Tahlili", callback_data=f"sa_{ticker}"))
-        builder.add(types.InlineKeyboardButton(text="📈 TradingView Signallari", callback_data=f"tv_{ticker}"))
-        builder.adjust(1)
+        # Inline tugmalar (Telebot formatida)
+        markup = telebot.types.InlineKeyboardMarkup()
+        btn1 = telebot.types.InlineKeyboardButton(text="🧡 Seeking Alpha Tahlili", callback_data=f"sa_{ticker}")
+        btn2 = telebot.types.InlineKeyboardButton(text="📈 TradingView Signallari", callback_data=f"tv_{ticker}")
+        markup.add(btn1)
+        markup.add(btn2)
         
-        await message.answer(report_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+        bot.edit_message_text(report_text, chat_id=message.chat.id, message_id=status_msg.message_id, reply_markup=markup, parse_mode="Markdown")
         return
 
-    await message.answer("❌ Tiker topilmadi.")
+    bot.edit_message_text("❌ Tiker topilmadi.", chat_id=message.chat.id, message_id=status_msg.message_id)
 
-@dp.callback_query(F.data.startswith("sa_"))
-async def sa_callback(callback: types.CallbackQuery):
-    ticker = callback.data.split("_")[1]
-    await callback.message.answer(f"🧡 **Seeking Alpha ({ticker}):**\n🤖 Quant Score: **4.25 / 5.0**\nValue: *B-* | Growth: *A+*")
-    await callback.answer()
+@bot.callback_query_handler(func=lambda call: True)
+def callback_inline(call):
+    ticker = call.data.split("_")[1]
+    if call.data.startswith("sa_"):
+        bot.send_message(call.message.chat.id, f"🧡 **Seeking Alpha ({ticker}):**\n🤖 Quant Score: **4.25 / 5.0**\nValue: *B-* | Growth: *A+*", parse_mode="Markdown")
+    elif call.data.startswith("tv_"):
+        bot.send_message(call.message.chat.id, f"📈 **TradingView ({ticker}):**\n🟢 **STRONG BUY**\n• RSI: 58.4\n• MACD: Bullish", parse_mode="Markdown")
+    bot.answer_callback_query(call.id)
 
-@dp.callback_query(F.data.startswith("tv_"))
-async def tv_callback(callback: types.CallbackQuery):
-    ticker = callback.data.split("_")[1]
-    await callback.message.answer(f"📈 **TradingView ({ticker}):**\n🟢 **STRONG BUY**\n• RSI: 58.4\n• MACD: Bullish")
-    await callback.answer()
-
-# Asosiy ishga tushirish qismi
-async def main():
-    Thread(target=run_flask).start()
-    await dp.start_polling(bot)
-
+# Loyihani parallel yoqish
 if __name__ == "__main__":
-    asyncio.run(main())
+    Thread(target=run_flask).start()
+    bot.infinity_polling()
