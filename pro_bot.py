@@ -22,7 +22,7 @@ import ta
 import pandas as pd
 from datetime import datetime
 
-TOKEN = '8781183838:AAEcHw_5d0rDnLFmA07pGFO7y4Uh8ZRTeg8'
+TOKEN = '8781183838:AAGkxCEkz4gYxDycD3jB8dXiBQ59OXg73uY'
 ADMIN_ID = "745170275"
 bot = telebot.TeleBot(TOKEN)
 
