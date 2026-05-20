@@ -1,7 +1,23 @@
+import subprocess
+import sys
+
+# Kutubxonalarni avtomatik o'rnatish bloki
+def install(package):
+    subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+
+packages = ["ta", "yfinance", "pandas", "pyTelegramBotAPI"]
+for p in packages:
+    try:
+        __import__(p.split('==')[0])
+    except ImportError:
+        install(p)
+
+# Asosiy importlar
 import telebot
 from telebot import types
 import yfinance as yf
 import ta
+import pandas as pd
 from datetime import datetime
 import os
 
@@ -17,26 +33,22 @@ def save_user(message):
     if user_id not in users:
         with open("users.txt", "a") as f: f.write(user_id + "\n")
 
-# Pro-tahlil funksiyasi (18 ta ko'rsatkich + ICT/SMC)
+# Pro-tahlil funksiyasi
 def get_pro_analysis(ticker):
     try:
         stock = yf.Ticker(ticker.upper())
         info = stock.info
         hist = stock.history(period="6mo")
         
-        # Kompaniya pasporti
+        # Ma'lumotlar
         ipo = info.get('firstTradeDate', 'N/A')
         if ipo != 'N/A': ipo = datetime.fromtimestamp(ipo).strftime('%Y-%m-%d')
         m_cap = info.get('marketCap', 0) / 1e9
         emp = info.get('fullTimeEmployees', 'N/A')
         cash = info.get('totalCash', 0) / 1e9
         debt = info.get('totalDebt', 0) / 1e9
-        
-        # Fundamental
         pe = info.get('trailingPE', 0)
         roe = info.get('returnOnEquity', 0) * 100
-        
-        # SMC/ICT
         rsi = ta.momentum.rsi(hist['Close'], window=14).iloc[-1]
         
         msg = (f"🚨 <b>PRO-ANALIZ: {ticker.upper()}</b>\n"
@@ -44,33 +56,32 @@ def get_pro_analysis(ticker):
                f"🏢 Kompaniya: {info.get('longName')}\n"
                f"📅 IPO: {ipo} | 👥 Ishchilar: {emp}\n"
                f"💰 Market Cap: {m_cap:.2f}B | 💵 Cash: {cash:.2f}B\n"
-               f"🚨 Jami Qarz: {debt:.2f}B {'🟢' if debt < 5 else '🔴'}\n"
-               f"📊 P/E: {pe:.1f} {'🟢' if pe < 25 else '🔴'} | ROE: {roe:.1f}% {'🟢' if roe > 15 else '🔴'}\n"
+               f"🚨 Jami Qarz: {debt:.2f}B\n"
+               f"📊 P/E: {pe:.1f} | ROE: {roe:.1f}%\n"
                f"━━━━━━━━━━━━━━━━━━━━\n"
-               f"🐳 <b>KITLAR (Insider):</b> 78.4% (BlackRock/Vanguard)\n"
-               f"📐 <b>ICT/SMC RSI:</b> {rsi:.1f} {'🟡 KUTISH' if 40 < rsi < 60 else '🟢 HARID'}\n"
+               f"🐳 <b>KITLAR:</b> 78.4% (BlackRock/Vanguard)\n"
+               f"📐 <b>ICT/SMC RSI:</b> {rsi:.1f}\n"
                f"🎯 <b>YAKUNIY SIGNAL:</b> {'🟢 SOTIB OLISH' if pe < 25 and debt < 5 else '🔴 KUTISH'}")
         return msg
-    except: return "❌ Tiker topilmadi!"
+    except Exception as e:
+        return f"❌ Tahlil xatosi: {e}"
 
-# Bot komandalari
 @bot.message_handler(commands=['start', 'admin'])
 def start(message):
     save_user(message)
     if message.text == '/start':
         kb = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
         kb.add("📈 Fond bozori", "₿ Crypto", "💱 Forex", "🛢 Xomashyo", "⚔️ Raqobat tahlili", "🐳 Kitlar & Siyosat", "🕒 Bozor vaqti", "📰 Yangiliklar")
-        bot.send_message(message.chat.id, "📊 Wall Street Intelligence tizimi ishga tushdi!", reply_markup=kb)
-    
+        bot.send_message(message.chat.id, "📊 Wall Street Intelligence ishga tushdi!", reply_markup=kb)
     elif message.text == '/admin' and str(message.chat.id) == ADMIN_ID:
         with open("users.txt", "r") as f: count = len(f.readlines())
         bot.send_message(message.chat.id, f"👑 Admin Panel. Foydalanuvchilar: {count}")
 
-# Xabarlarni qabul qilish
 @bot.message_handler(func=lambda message: True)
 def handle(message):
     save_user(message)
-    if len(message.text) <= 6 and message.text[0] not in ["/", "📈", "₿"]:
+    # Tiker yozilganda tahlilni boshlaydi
+    if len(message.text) <= 6 and message.text not in ["📈 Fond bozori", "₿ Crypto", "💱 Forex", "🛢 Xomashyo", "⚔️ Raqobat tahlili", "🐳 Kitlar & Siyosat", "🕒 Bozor vaqti", "📰 Yangiliklar"]:
         bot.reply_to(message, get_pro_analysis(message.text), parse_mode="HTML")
     else:
         bot.reply_to(message, "Iltimos, tiker nomini yozing (masalan: AAPL).")
