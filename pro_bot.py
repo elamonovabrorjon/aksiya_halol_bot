@@ -7,7 +7,7 @@ TOKEN = '8781183838:AAGkxCEkz4gYxDycD3jB8dXiBQ59OXg73uY'
 bot = telebot.TeleBot(TOKEN)
 exchange = ccxt.binance()
 
-# --- 1. LUG'AT FUNKSIYASI ---
+# --- 1. LUG'AT ---
 def get_dictionary():
     return ("📖 <b>MOLIYAVIY LUG'AT:</b>\n\n"
             "• <b>P/E:</b> Narx/Foyda nisbati.\n"
@@ -17,7 +17,7 @@ def get_dictionary():
             "• <b>Market Cap:</b> Kompaniyaning umumiy bozor qiymati.\n"
             "• <b>ROE:</b> Kapital rentabelligi.")
 
-# --- 2. BOOKMAP FUNKSIYASI (REAL TIME ORDER FLOW) ---
+# --- 2. BOOKMAP (REAL TIME) ---
 def get_bookmap_data(ticker):
     try:
         symbol = f"{ticker.upper()}/USDT"
@@ -29,13 +29,12 @@ def get_bookmap_data(ticker):
         return msg
     except: return "❌ Bookmap ma'lumotini olishda xatolik."
 
-# --- 3. PROFESSIONAL TAHLIL (18 ta ko'rsatkich + Moliyaviy balans) ---
+# --- 3. PROFESSIONAL TAHLIL ---
 def get_full_pro_analysis(ticker):
     try:
         t = yf.Ticker(ticker.upper())
         info = t.info
         holders = t.institutional_holders
-        
         def f(n): return f"{n/1e9:.2f}B" if n and n >= 1e9 else f"{n/1e6:.2f}M"
         
         holders_text = "".join([f"    🔹 {r['Holder']}: {r['pctHeld']:.2f}%\n" for i, r in holders.head(3).iterrows()])
@@ -57,7 +56,7 @@ def get_full_pro_analysis(ticker):
         return msg
     except: return "❌ Tahlil xatosi: Tiker nomini tekshiring."
 
-# --- 4. ASOSIY MENYU ---
+# --- 4. ASOSIY MENYU VA HANDLE ---
 @bot.message_handler(commands=['start'])
 def start(message):
     kb = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
@@ -68,13 +67,17 @@ def start(message):
 
 @bot.message_handler(func=lambda message: True)
 def handle(message):
-    text = message.text
-    if text == "📖 Lug'at": bot.reply_to(message, get_dictionary(), parse_mode="HTML")
+    text = message.text.strip()
+    if text == "📖 Lug'at": 
+        bot.reply_to(message, get_dictionary(), parse_mode="HTML")
     elif text == "📊 Bookmap": 
         msg = bot.reply_to(message, "Tiker kiriting (masalan: BTC, ETH):")
         bot.register_next_step_handler(msg, lambda m: bot.reply_to(m, get_bookmap_data(m.text), parse_mode="HTML"))
-    elif text == "🆘 Adminlik (Yordam)": bot.reply_to(message, "Admin: @EAA_7879")
-    elif len(text) <= 5 and text.isalpha(): bot.reply_to(message, get_full_pro_analysis(text), parse_mode="HTML")
-    else: bot.reply_to(message, "Tiker yozing yoki menyudan foydalaning.")
+    elif text == "🆘 Adminlik (Yordam)": 
+        bot.reply_to(message, "Admin: @EAA_7879")
+    elif len(text) <= 10: 
+        bot.reply_to(message, get_full_pro_analysis(text), parse_mode="HTML")
+    else: 
+        bot.reply_to(message, "Tiker yozing yoki menyudan foydalaning.")
 
 bot.polling(none_stop=True)
