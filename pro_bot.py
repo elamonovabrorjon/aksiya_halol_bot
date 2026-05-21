@@ -23,7 +23,8 @@ import ta
 import pandas as pd
 from datetime import datetime
 
-TOKEN = '8781183838:AAEcHw_5d0rDnLFmA07pGFO7y4Uh8ZRTeg8'
+# YANI TOKEN O'RNATILDI
+TOKEN = '8781183838:AAGkxCEkz4gYxDycD3jB8dXiBQ59OXg73uY'
 ADMIN_ID = "745170275"
 bot = telebot.TeleBot(TOKEN)
 
@@ -39,7 +40,7 @@ def run_web():
 t = Thread(target=run_web)
 t.start()
 
-# --- Funksiyalar ---
+# --- Asosiy funksiyalar ---
 def save_user(message):
     user_id = str(message.chat.id)
     if not os.path.exists("users.txt"): open("users.txt", "w").close()
@@ -88,29 +89,18 @@ def broadcast(message):
                     except: continue
             bot.reply_to(message, "✅ Xabar yuborildi.")
 
-@bot.message_handler(commands=['ban'])
-def ban(message):
-    if str(message.chat.id) == ADMIN_ID:
-        target_id = message.text.split()[1]
-        with open("banned.txt", "a") as f: f.write(target_id + "\n")
-        bot.reply_to(message, f"🚫 Foydalanuvchi {target_id} bloklandi.")
-
 # --- Asosiy Handler ---
 @bot.message_handler(commands=['start'])
 def start(message):
-    # Bloklanganmi tekshirish
-    if os.path.exists("banned.txt"):
-        with open("banned.txt", "r") as f:
-            if str(message.chat.id) in f.read().splitlines(): return
-            
     save_user(message)
     markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     markup.add("📈 Halol aksiyalar", "🔍 RSI Skriner", "🤖 AI Tavsiyalari")
-    bot.send_message(message.chat.id, "🇺🇿 UFinanz Terminaliga xush kelibsiz!", reply_markup=markup)
+    bot.send_message(message.chat.id, "🇺🇿 UFinanz Terminaliga xush kelibsiz! Tiker yozing:", reply_markup=markup, parse_mode="HTML")
 
 @bot.message_handler(func=lambda message: True)
 def handle(message):
     bot.reply_to(message, get_pro_analysis(message.text), parse_mode="HTML")
 
 if __name__ == '__main__':
-    bot.infinity_polling(skip_pending=True)
+    bot.remove_webhook()
+    bot.infinity_polling(timeout=60, long_polling_timeout=60)
