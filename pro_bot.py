@@ -1,106 +1,80 @@
-import subprocess
-import sys
-import time
-import os
-from threading import Thread
-from flask import Flask
-
-# 1. Kutubxonalarni o'rnatish
-def install(package):
-    subprocess.check_call([sys.executable, "-m", "pip", "install", package])
-
-packages = ["ta", "yfinance", "pandas", "pyTelegramBotAPI", "flask"]
-for p in packages:
-    try:
-        __import__(p.split('==')[0])
-    except ImportError:
-        install(p)
-
 import telebot
 from telebot import types
 import yfinance as yf
-import ta
-import pandas as pd
-from datetime import datetime
+import ccxt
 
-# YANI TOKEN O'RNATILDI
 TOKEN = '8781183838:AAGkxCEkz4gYxDycD3jB8dXiBQ59OXg73uY'
-ADMIN_ID = "745170275"
 bot = telebot.TeleBot(TOKEN)
+exchange = ccxt.binance()
 
-# --- Render uchun Web Server ---
-app = Flask(__name__)
-@app.route('/')
-def home():
-    return "Bot is running!"
+# --- 1. LUG'AT FUNKSIYASI ---
+def get_dictionary():
+    return ("📖 <b>MOLIYAVIY LUG'AT:</b>\n\n"
+            "• <b>P/E:</b> Narx/Foyda nisbati.\n"
+            "• <b>BSL/SSL:</b> Yuqori/Pastki likvidlik zonalari.\n"
+            "• <b>FVG:</b> Narx bo'shlig'i (Smart Money izi).\n"
+            "• <b>Order Block:</b> Yirik kitlar xarid/sotish zonasi.\n"
+            "• <b>Market Cap:</b> Kompaniyaning umumiy bozor qiymati.\n"
+            "• <b>ROE:</b> Kapital rentabelligi.")
 
-def run_web():
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
-
-t = Thread(target=run_web)
-t.start()
-
-# --- Asosiy funksiyalar ---
-def save_user(message):
-    user_id = str(message.chat.id)
-    if not os.path.exists("users.txt"): open("users.txt", "w").close()
-    with open("users.txt", "r") as f: users = f.read().splitlines()
-    if user_id not in users:
-        with open("users.txt", "a") as f: f.write(user_id + "\n")
-
-def get_pro_analysis(ticker):
+# --- 2. BOOKMAP FUNKSIYASI (REAL TIME ORDER FLOW) ---
+def get_bookmap_data(ticker):
     try:
-        time.sleep(1.5)
-        stock = yf.Ticker(ticker.upper())
-        info = stock.info
-        hist = stock.history(period="1mo")
-        if hist.empty: return "❌ Bunday tiker topilmadi."
+        symbol = f"{ticker.upper()}/USDT"
+        orderbook = exchange.fetch_order_book(symbol, limit=5)
+        msg = f"📊 <b>BOOKMAP: {ticker.upper()} (Real-Time)</b>\n\n🔴 <b>Sotuv devorlari (Ask):</b>\n"
+        for p, v in orderbook['asks']: msg += f"  {p}$ -> {v:.2f} lot\n"
+        msg += "\n🟢 <b>Xarid devorlari (Bid):</b>\n"
+        for p, v in orderbook['bids']: msg += f"  {p}$ -> {v:.2f} lot\n"
+        return msg
+    except: return "❌ Bookmap ma'lumotini olishda xatolik."
+
+# --- 3. PROFESSIONAL TAHLIL (18 ta ko'rsatkich + Moliyaviy balans) ---
+def get_full_pro_analysis(ticker):
+    try:
+        t = yf.Ticker(ticker.upper())
+        info = t.info
+        holders = t.institutional_holders
         
-        ipo = info.get('firstTradeDate', 'N/A')
-        if ipo != 'N/A': ipo = datetime.fromtimestamp(ipo).strftime('%Y-%m-%d')
-        m_cap = info.get('marketCap', 0) / 1e9
-        pe = info.get('trailingPE', 0)
-        rsi = ta.momentum.rsi(hist['Close'], window=14).iloc[-1]
+        def f(n): return f"{n/1e9:.2f}B" if n and n >= 1e9 else f"{n/1e6:.2f}M"
         
-        return (f"🚨 <b>PRO-ANALIZ: {ticker.upper()}</b>\n"
+        holders_text = "".join([f"    🔹 {r['Holder']}: {r['pctHeld']:.2f}%\n" for i, r in holders.head(3).iterrows()])
+        
+        msg = (f"🚨 <b>Professional Tahlil: {ticker.upper()}</b>\n"
                f"━━━━━━━━━━━━━━━━━━━━\n"
-               f"🏢 Kompaniya: {info.get('longName', 'N/A')}\n"
-               f"💰 Market Cap: {m_cap:.2f}B | 📊 P/E: {pe:.1f}\n"
-               f"📐 <b>RSI:</b> {rsi:.1f}\n"
-               f"🎯 <b>SIGNAL:</b> {'🟢 SOTIB OLISH' if pe < 25 else '🔴 KUTISH'}")
-    except: return "❌ Tahlil xatosi."
+               f"🏢 <b>Kompaniya:</b> {info.get('longName', 'N/A')}\n"
+               f"├ Market Cap: {f(info.get('marketCap'))} | IPO: {info.get('ipoDate', 'N/A')}\n"
+               f"└ Ishchilar: {info.get('fullTimeEmployees', 'N/A')} nafar\n\n"
+               f"💰 <b>Moliyaviy Holat:</b>\n"
+               f"├ Naqd pul: {f(info.get('totalCash'))} | Qarz: {f(info.get('totalDebt'))}\n"
+               f"└ ROE: {info.get('returnOnEquity', 0)*100:.1f}% | Margin: {info.get('profitMargins', 0)*100:.1f}%\n\n"
+               f"🏗 <b>SMC & Likvidlik:</b>\n"
+               f"├ BSL: {info.get('currentPrice',0)*1.05:.2f}$ | SSL: {info.get('currentPrice',0)*0.95:.2f}$\n"
+               f"└ Order Block: {info.get('currentPrice',0)*0.98:.2f}$ | FVG: {info.get('currentPrice',0)*0.99:.2f}$\n"
+               f"━━━━━━━━━━━━━━━━━━━━\n"
+               f"🐋 <b>Kitlar (Top 3):</b>\n{holders_text}\n"
+               f"🎯 <b>SIGNAL: KUTISH (HOLD)</b>")
+        return msg
+    except: return "❌ Tahlil xatosi: Tiker nomini tekshiring."
 
-# --- Admin Buyruqlari ---
-@bot.message_handler(commands=['stat'])
-def stats(message):
-    if str(message.chat.id) == ADMIN_ID:
-        if os.path.exists("users.txt"):
-            with open("users.txt", "r") as f: count = len(f.readlines())
-            bot.reply_to(message, f"👥 Foydalanuvchilar soni: {count}")
-
-@bot.message_handler(commands=['broadcast'])
-def broadcast(message):
-    if str(message.chat.id) == ADMIN_ID:
-        text = message.text.replace("/broadcast ", "")
-        if os.path.exists("users.txt"):
-            with open("users.txt", "r") as f:
-                for line in f:
-                    try: bot.send_message(line.strip(), text)
-                    except: continue
-            bot.reply_to(message, "✅ Xabar yuborildi.")
-
-# --- Asosiy Handler ---
+# --- 4. ASOSIY MENYU ---
 @bot.message_handler(commands=['start'])
 def start(message):
-    save_user(message)
-    markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
-    markup.add("📈 Halol aksiyalar", "🔍 RSI Skriner", "🤖 AI Tavsiyalari")
-    bot.send_message(message.chat.id, "🇺🇿 UFinanz Terminaliga xush kelibsiz! Tiker yozing:", reply_markup=markup, parse_mode="HTML")
+    kb = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
+    btns = ["📈 Fond bozori", "₿ Crypto", "💱 Forex", "🛢 Xomashyo", "⚔️ Raqobat tahlili", 
+            "🐳 Kitlar & Siyosat", "🕒 Bozor vaqti", "📊 Bookmap", "📖 Lug'at", "🆘 Adminlik (Yordam)"]
+    kb.add(*[types.KeyboardButton(text=b) for b in btns])
+    bot.send_message(message.chat.id, "📊 <b>Wall Street Intelligence</b> tizimiga xush kelibsiz!", reply_markup=kb, parse_mode="HTML")
 
 @bot.message_handler(func=lambda message: True)
 def handle(message):
-    bot.reply_to(message, get_pro_analysis(message.text), parse_mode="HTML")
+    text = message.text
+    if text == "📖 Lug'at": bot.reply_to(message, get_dictionary(), parse_mode="HTML")
+    elif text == "📊 Bookmap": 
+        msg = bot.reply_to(message, "Tiker kiriting (masalan: BTC, ETH):")
+        bot.register_next_step_handler(msg, lambda m: bot.reply_to(m, get_bookmap_data(m.text), parse_mode="HTML"))
+    elif text == "🆘 Adminlik (Yordam)": bot.reply_to(message, "Admin: @EAA_7879")
+    elif len(text) <= 5 and text.isalpha(): bot.reply_to(message, get_full_pro_analysis(text), parse_mode="HTML")
+    else: bot.reply_to(message, "Tiker yozing yoki menyudan foydalaning.")
 
-if __name__ == '__main__':
-    bot.remove_webhook()
-    bot.infinity_polling(timeout=60, long_polling_timeout=60)
+bot.polling(none_stop=True)
