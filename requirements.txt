@@ -1,8 +1,9 @@
+
 pyTelegramBotAPI==4.26.0
 yfinance==0.2.54
 pandas==2.2.3
 requests==2.32.3
 beautifulsoup4==4.12.3
 ta==0.11.0
-flask 
-ccxt
+flask
+ccxt==4.3.0
