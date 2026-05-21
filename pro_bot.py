@@ -80,4 +80,25 @@ def handle(message):
     else: 
         bot.reply_to(message, "Tiker yozing yoki menyudan foydalaning.")
 
-bot.polling(none_stop=True)
+# ... (Yuqoridagi barcha funksiyalar: get_dictionary, get_bookmap_data, get_full_pro_analysis) ...
+
+# ... (start funksiyasi va handle funksiyasi) ...
+
+# --- BOTNING ENG OXIRGI QISMI (Buni o'zgartiring) ---
+import threading
+from flask import Flask
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot ishlayapti!"
+
+def run_flask():
+    app.run(host="0.0.0.0", port=10000)
+
+if __name__ == "__main__":
+    # Flask-ni alohida thread'da ishga tushiramiz
+    threading.Thread(target=run_flask).start()
+    # Botni ishga tushiramiz
+    bot.polling(none_stop=True)
