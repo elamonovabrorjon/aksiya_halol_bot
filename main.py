@@ -1,4 +1,4 @@
- import telebot
+import telebot
 from telebot import types
 import yfinance as yf
 from datetime import datetime
