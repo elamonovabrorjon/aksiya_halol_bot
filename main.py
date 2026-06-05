@@ -49,8 +49,7 @@ def get_18_point_analysis(ticker: str):
 17. Xulosa: <b>{rec}</b>
 🕌 <b>Halollik:</b> {'✅ HALOL' if debt_ratio < 33 else '❌ HARAM'}"""
     except Exception as e:
-        return f"❌ Xatolik: {str(e)[:120]}
-Ticker to‘g‘riligini tekshiring."
+        return f"❌ Xatolik: {str(e)[:120]}\nTicker to'g'riligini tekshiring."
 
 
 # ==================== BOOKMAP GRAFIKASI ====================
@@ -58,7 +57,7 @@ def send_bookmap_chart(message, ticker: str):
     try:
         ticker = ticker.strip().upper()
         data = yf.download(ticker, period="1mo", interval="1d", progress=False)
-        
+
         if data.empty:
             bot.reply_to(message, "❌ Ma'lumot topilmadi.")
             return
@@ -79,15 +78,15 @@ def send_bookmap_chart(message, ticker: str):
         plt.grid(True)
 
         plt.tight_layout()
-        
+
         filename = f"{ticker}_bookmap.png"
         plt.savefig(filename)
         plt.close()
 
         with open(filename, 'rb') as photo:
-            bot.send_photo(message.chat.id, photo, 
-                         caption=f"📊 {ticker} — Bookmap uslubidagi tahlil")
-        
+            bot.send_photo(message.chat.id, photo,
+                           caption=f"📊 {ticker} — Bookmap uslubidagi tahlil")
+
         os.remove(filename)
 
     except Exception as e:
@@ -107,9 +106,7 @@ def start(message):
 
     bot.send_message(
         message.chat.id,
-        "👋 <b>Aksiya Halol Bot</b> ga xush kelibsiz!
-
-Kerakli bo‘limni tanlang yoki tiker yuboring.",
+        "👋 <b>Aksiya Halol Bot</b> ga xush kelibsiz!\n\nKerakli bo'limni tanlang yoki tiker yuboring.",
         reply_markup=markup,
         parse_mode="HTML"
     )
@@ -120,14 +117,15 @@ Kerakli bo‘limni tanlang yoki tiker yuboring.",
 def handle_buttons(message):
     text = message.text.strip()
 
+    # ==================== TUGMALAR ====================
     if text == "📖 Lug'at":
-        bot.reply_to(message, "📖 Lug'at bo‘limi tez orada to‘liq ishga tushadi.", parse_mode="HTML")
+        bot.reply_to(message, "📖 Lug'at bo'limi tez orada to'liq ishga tushadi.", parse_mode="HTML")
 
     elif text == "⏰ Bozor vaqti":
-        bot.reply_to(message, "⏰ Bozor vaqti bo‘limi tez orada yangilanadi.", parse_mode="HTML")
+        bot.reply_to(message, "⏰ Bozor vaqti bo'limi tez orada yangilanadi.", parse_mode="HTML")
 
     elif text == "📰 Yangiliklar":
-        bot.reply_to(message, "📰 Yangiliklar bo‘limi tayyorlanmoqda...", parse_mode="HTML")
+        bot.reply_to(message, "📰 Yangiliklar bo'limi tayyorlanmoqda...", parse_mode="HTML")
 
     elif text == "📊 Bookmap":
         bot.reply_to(message, """📊 <b>Bookmap rejimi yoqildi!</b>
@@ -141,19 +139,20 @@ Endi istalgan ticker yuboring:
 Bot sizga grafika + tahlil yuboradi.""", parse_mode="HTML")
 
     elif text == "🐳 Kitlar & Siyosat":
-        bot.reply_to(message, "🐳 Kitlar & Siyosat bo‘limi tayyorlanmoqda...", parse_mode="HTML")
+        bot.reply_to(message, "🐳 Kitlar & Siyosat bo'limi tayyorlanmoqda...", parse_mode="HTML")
 
     elif text == "⚔️ Raqobat tahlili":
         bot.reply_to(message, "⚔️ Raqobat tahlili uchun 2-5 ta tiker yozing (masalan: AAPL MSFT NVDA)", parse_mode="HTML")
 
     elif text in ["📈 Fond bozori", "₿ Crypto", "🌍 Forex", "🛢 Xomashyo"]:
-        bot.reply_to(message, "✅ Tahlil qilmoqchi bo‘lgan tiker yuboring.", parse_mode="HTML")
+        bot.reply_to(message, "✅ Tahlil qilmoqchi bo'lgan tiker yuboring.", parse_mode="HTML")
 
     elif text == "🆘 Adminlik (Yordam)":
-        bot.reply_to(message, "🆘 Yordam kerak bo‘lsa savolingizni yozing.", parse_mode="HTML")
+        bot.reply_to(message, "🆘 Yordam kerak bo'lsa savolingizni yozing.", parse_mode="HTML")
 
+    # ==================== TIKER TAHLILI ====================
     else:
-        if len(text) <= 12 and text.replace('-','').replace('=','').isalnum():
+        if len(text) <= 12 and text.replace('-', '').replace('=', '').isalnum():
             send_bookmap_chart(message, text)
             analysis = get_18_point_analysis(text)
             bot.reply_to(message, analysis, parse_mode="HTML")
@@ -164,4 +163,4 @@ Bot sizga grafika + tahlil yuboradi.""", parse_mode="HTML")
 
 if __name__ == "__main__":
     print("🚀 Aksiya Halol Bot ishga tushdi...")
-    bot.infinity_polling(none_stop=True, interval=0)
+    bot.infinity_polling(none_stop=True, 
