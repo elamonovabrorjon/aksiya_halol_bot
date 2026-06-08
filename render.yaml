@@ -1,9 +1,13 @@
 services:
-  - type: worker
-    name: aksiya_halol_bot
+    - type: worker
+    name: aksiya-halol-bot
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: python pro_bot.py
+    startCommand: python bot.py
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.10
+            - key: PYTHON_VERSION
+        value: 3.11.0
+            - key: TELEGRAM_BOT_TOKEN
+        sync: false
+            - key: ADMIN_IDS
+        sync: false
