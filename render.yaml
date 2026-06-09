@@ -1,12 +1,11 @@
 services:
-    - type: worker
+    - type: web
     name: aksiya-halol-bot
     env: python
-    runtime: python3.11.0
     buildCommand: pip install --upgrade pip && pip install -r requirements.txt
     startCommand: python bot.py
     envVars:
-            - key: TELEGRAM_BOT_TOKEN
+            - key: TELEGRAM_TOKEN
         sync: false
-            - key: ADMIN_IDS
-        value: 745170275
+            - key: CHAT_ID
+        value: "745170275"
