@@ -1,9 +1,6 @@
 services:
     - type: worker
     name: aksiya-halol-bot
-    runtime: python
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "python bot.py"
-    envVars:
-            - key: TOKEN
-        sync: false
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
