@@ -1,4 +1,4 @@
-Import os, telebot, time, yfinance as yf, sqlite3, datetime, threading, matplotlib
+import os, telebot, time, yfinance as yf, sqlite3, datetime, threading, matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from flask import Flask
