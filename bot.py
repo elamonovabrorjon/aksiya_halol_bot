@@ -3,7 +3,7 @@ import requests
 import time
 import threading
 
-TOKEN = "7972155385:AAHbmTbzE_FK7_yuD3lbrJ0_sV3-p4c4P0Y"
+TOKEN = "8781183838:AAFmgLoz6Bb8LlA-50lVAdAbNvhBCWO3sm0"
 CHAT_ID = 5736191321
 FINNHUB_API = "d1ut5j9r01qqt8g82jvgd1ut5j9r01qqt8g82k00"
 
