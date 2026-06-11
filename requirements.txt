@@ -1,4 +1,3 @@
 aiogram
 yfinance
 pandas
-pandas-ta
