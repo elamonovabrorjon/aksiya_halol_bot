@@ -1,3 +1,4 @@
 aiogram
 yfinance
 pandas
+aiohttp
