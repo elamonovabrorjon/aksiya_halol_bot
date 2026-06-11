@@ -1,5 +1,2 @@
 pyTelegramBotAPI==4.14.0
-yfinance==0.2.38
-pandas==2.1.4
-ta==0.10.2
-lxml==4.9.3
+requests==2.31.0
