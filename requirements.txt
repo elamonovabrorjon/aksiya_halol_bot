@@ -1,4 +1,5 @@
 pyTelegramBotAPI
 yfinance
 pandas
-flask
+numpy
+ta
