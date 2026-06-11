@@ -1,73 +1,45 @@
-import telebot
-import requests
-import time
-import threading
+import asyncio
+import logging
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.filters import Command
+import yfinance as yf
 
-TOKEN = "8781183838:AAFmgLoz6Bb8LlA-50lVAdAbNvhBCWO3sm0"
-CHAT_ID = 5736191321
-FINNHUB_API = "d1ut5j9r01qqt8g82jvgd1ut5j9r01qqt8g82k00"
+# TOKENINGIZNI SHU YERGA (YANGILANGANINI) QO'YING
+TOKEN = "8781183838:AAFmgLoz6Bb8LlA-50lVAdAbNvhBCWO3sm0" 
+bot = Bot(token=TOKEN)
+dp = Dispatcher()
 
-bot = telebot.TeleBot(TOKEN)
-AUTO_ON = False
+# Logger
+logging.basicConfig(level=logging.INFO)
 
-TICKERS = ["AAPL","MSFT","GOOGL","TSLA","AMZN","META","NVDA","AMD","INTC","NFLX"]
-
-def get_price(ticker):
+# --- Professional Tahlil Servisi (Barcha bozorlar uchun) ---
+async def get_market_data(ticker_symbol: str):
     try:
-        url = f"https://finnhub.io/api/v1/quote?symbol={ticker}&token={FINNHUB_API}"
-        r = requests.get(url, timeout=10).json()
-        return r.get('c', 0)
-    except:
-        return 0
+        data = yf.Ticker(ticker_symbol)
+        hist = data.history(period="1d")
+        if hist.empty: return None
+        return data.info
+    except: return None
 
-def scan_stocks():
-    results = []
-    for t in TICKERS:
-        price = get_price(t)
-        if price > 0:
-            change = ((price - 100) / 100) * 5  # oddiy signal
-            if abs(change) > 2:
-                results.append(f"📈 {t}: ${price:.2f} ({'+' if change>0 else ''}{change:.1f}%)")
-        time.sleep(0.5)
-    return results
+@dp.message(Command("start"))
+async def start_cmd(message: types.Message):
+    # Professional menyu (Inline tugmalar)
+    builder = types.InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="📊 Forex", callback_data="market_forex"),
+                types.InlineKeyboardButton(text="💰 Kripto", callback_data="market_crypto"))
+    builder.row(types.InlineKeyboardButton(text="📈 Fond bozori", callback_data="market_stock"))
+    
+    await message.answer("Xush kelibsiz! Bozor turini tanlang:", reply_markup=builder.as_markup())
 
-@bot.message_handler(commands=['start'])
-def start(m):
-    bot.send_message(m.chat.id, "✅ Bot tayyor!\n/scan - tekshirish\n/auto_on - avtomatik\n/auto_off - o'chirish")
+@dp.callback_query(F.data.startswith("market_"))
+async def market_choice(callback: types.CallbackQuery):
+    market = callback.data.split("_")[1]
+    await callback.message.answer(f"Siz {market.upper()} tanladingiz. Ticker nomini yozing:")
+    # Bu yerda state (holat)ni saqlash mantiqini ishlatish kerak
 
-@bot.message_handler(commands=['scan'])
-def scan(m):
-    bot.send_message(m.chat.id, "🔍 Tekshirilmoqda...")
-    res = scan_stocks()
-    if res:
-        bot.send_message(m.chat.id, "Halol signal topildi:\n\n" + "\n".join(res[:5]))
-    else:
-        bot.send_message(m.chat.id, "Hozir signal yo'q")
+# --- Botni ishga tushirish ---
+async def main():
+    await dp.start_polling(bot)
 
-@bot.message_handler(commands=['auto_on'])
-def on(m):
-    global AUTO_ON
-    AUTO_ON = True
-    bot.send_message(m.chat.id, "✅ Avtomatik yoqildi (har 30 daqiqa)")
-
-@bot.message_handler(commands=['auto_off'])
-def off(m):
-    global AUTO_ON
-    AUTO_ON = False
-    bot.send_message(m.chat.id, "❌ Avtomatik o'chirildi")
-
-def auto_loop():
-    while True:
-        if AUTO_ON:
-            try:
-                res = scan_stocks()
-                if res:
-                    bot.send_message(CHAT_ID, "🤖 Avto signal:\n" + "\n".join(res[:3]))
-            except:
-                pass
-        time.sleep(1800)  # 30 daqiqa
-
-threading.Thread(target=auto_loop, daemon=True).start()
-
-print("Bot ishga tushdi")
-bot.infinity_polling()
+if __name__ == "__main__":
+    asyncio.run(main())
