@@ -7,6 +7,7 @@ from aiogram.filters import Command
 from aiohttp import web
 
 # --- SOZLAMALAR ---
+# API_TOKEN Render muhit o'zgaruvchisidan olinadi
 API_TOKEN = os.environ.get('API_TOKEN')
 ADMIN_ID = 745170275
 
@@ -34,18 +35,20 @@ def analyze_stock(symbol):
         ticker = yf.Ticker(symbol)
         info = ticker.info
         hist = ticker.history(period="1y")
+        
         if hist.empty: return None
 
-        # Fundamental (3 ball)
+        # Fundamental tahlil (3 ball)
         score = 0
-        pe = info.get('trailingPE', 21)
+        pe = info.get('trailingPE') or info.get('forwardPE', 21)
         debt_eq = info.get('debtToEquity', 1.5)
         div_yield = info.get('dividendYield', 0) or 0
+        
         if pe < 20: score += 1
         if debt_eq < 1.0: score += 1
         if div_yield > 0.02: score += 1
 
-        # Bollinger Bands (2 ball)
+        # Bollinger Bands tahlili (2 ball)
         sma20 = hist['Close'].rolling(window=20).mean()
         std20 = hist['Close'].rolling(window=20).std()
         upper = sma20 + (std20 * 2)
@@ -55,10 +58,17 @@ def analyze_stock(symbol):
         if price < lower.iloc[-1] * 1.05: score += 1
         if price > ((upper.iloc[-1] + lower.iloc[-1]) / 2): score += 1
         
-        whale_percent = ticker.institutional_holders['% Shares'].sum() if ticker.institutional_holders is not None else 0
+        # Kitlar ulushi
+        whale = 0
+        try:
+            whale = ticker.institutional_holders['% Shares'].sum()
+        except: whale = 0
         
-        return {"score": score, "price": price, "pe": pe, "debt": debt_eq, "whale": whale_percent, "news": ticker.news[0]['title'] if ticker.news else "Yo'q"}
-    except:
+        news_title = ticker.news[0]['title'] if ticker.news else "Yangilik topilmadi"
+        
+        return {"score": score, "price": price, "pe": pe, "debt": debt_eq, "whale": whale, "news": news_title}
+    except Exception as e:
+        print(f"DEBUG Error: {e}")
         return None
 
 # --- HANDLERLAR ---
@@ -69,12 +79,14 @@ async def start(message: types.Message):
 
 @dp.message()
 async def process(message: types.Message):
-    data = analyze_stock(message.text.upper())
+    symbol = message.text.upper()
+    data = analyze_stock(symbol)
+    
     if not data:
-        await message.answer("Topilmadi yoki ma'lumot olishda xatolik.")
+        await message.answer(f"{symbol} uchun ma'lumot topilmadi. Boshqa ticker yozib ko'ring.")
         return
     
-    report = (f"📊 **{message.text.upper()} Tahlili**\n\n"
+    report = (f"📊 **{symbol} Tahlili**\n\n"
               f"⭐ **Baho: {data['score']}/5**\n"
               f"💰 **Narxi:** ${data['price']:.2f}\n\n"
               f"🏢 **Fund:** P/E={data['pe']}, D/E={data['debt']}\n"
