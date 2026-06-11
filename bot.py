@@ -1,13 +1,15 @@
 import asyncio
 import sqlite3
+import os
 import yfinance as yf
-import pandas_ta as ta
-from aiogram import Bot, Dispatcher, types, F
+import pandas as pd
+from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
+from aiohttp import web
 
 # --- SOZLAMALAR ---
-# ESLATMA: Yangi tokeningizni bu yerga qo'ying!
-API_TOKEN = 'YANGI_TOKENINGIZNI_SHU_YERGA_QO\'YING' 
+# Tokenni Render'ning Environment Variables qismida 'API_TOKEN' deb saqlang
+API_TOKEN = os.environ.get('API_TOKEN')
 ADMIN_ID = 745170275
 
 bot = Bot(token=API_TOKEN)
@@ -53,10 +55,15 @@ def analyze_stock(symbol):
     if div_yield > 0.02: score += 1
 
     # Bollinger Bands (2 ball)
-    hist.ta.bbands(length=20, std=2, append=True)
+    # Oddiy pandas yordamida BB hisoblash (pandas_ta muammosiz)
+    sma20 = hist['Close'].rolling(window=20).mean()
+    std20 = hist['Close'].rolling(window=20).std()
+    upper = sma20 + (std20 * 2)
+    lower = sma20 - (std20 * 2)
+    
     price = hist['Close'].iloc[-1]
-    bb_lower = hist['BBL_20_2.0'].iloc[-1]
-    bb_upper = hist['BBU_20_2.0'].iloc[-1]
+    bb_lower = lower.iloc[-1]
+    bb_upper = upper.iloc[-1]
     
     if price < bb_lower * 1.05: score += 1
     if price > (bb_upper + bb_lower) / 2: score += 1
@@ -80,7 +87,7 @@ async def broadcast(message: types.Message):
         for user_id in users:
             try: await bot.send_message(user_id, text)
             except: continue
-        await message.answer("Xabar barchaga yuborildi.")
+        await message.answer("Xabar yuborildi.")
 
 @dp.message()
 async def process(message: types.Message):
@@ -94,8 +101,20 @@ async def process(message: types.Message):
               f"📰 **Yangilik:** {data['news'][0]['title'] if data['news'] else 'Yo\'q'}")
     await message.answer(report, parse_mode="Markdown")
 
+# --- RENDER PORT BINDING ---
+async def handle(request):
+    return web.Response(text="Bot is running!")
+
 async def main():
     init_db()
+    # Web server
+    app = web.Application()
+    app.router.add_get('/', handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get('PORT', 8080)))
+    await site.start()
+    # Bot polling
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
