@@ -1,4 +1,6 @@
-aiogram
+pyTelegramBotAPI
 yfinance
+matplotlib
 pandas
-aiohttp
+numpy
+requests
