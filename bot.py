@@ -1,8 +1,12 @@
+import os
 import telebot
+from dotenv import load_dotenv
 import yfinance as tf
 
-# Bot tokeningizni kiriting
-TOKEN = "8781183838:AAFmgLoz6Bb8LlA-50lVAdAbNvhBCWO3sm0"
+# .env fayldan tokenni o'qish (yoki o'zingizning tokeningizni matn ko'rinishida yozishingiz ham mumkin)
+load_dotenv()
+TOKEN = os.getenv("TOKEN", "YOUR_BOT_TOKEN_HERE")
+
 bot = telebot.TeleBot(TOKEN)
 
 # Mashhur investorlar bazasi (namuna)
@@ -27,13 +31,15 @@ STOCK_OWNERS = {
 def send_welcome(message):
     welcome_text = (
         "Assalomu alaykum! 📈\n\n"
-        "Aksiya tikerini yuboring (masalan: `AAPL`, `MSFT`, `TSLA`). Bot quyidagilarni hisoblab beradi:\n"
-        "1. Real narx va o'zgarishlar\n"
-        "2. **Naqd pul miqdori va Umumiy qarz**\n"
-        "3. **Sektor ichidagi raqobatchilarga nisbatan solishtirma tahlil (Kuchli/Kuchsiz)**\n"
-        "4. Fundamental, Texnik va Shariat talablari\n"
-        "5. Yirik investorlar portfelida bor-yo'qligi"
+        "Bu bot yordamida **istalgan aksiyaning** tikerini yuborib quyidagilarni olishingiz mumkin:\n"
+        "1. Real vaqt rejimidagi narxi va bozor qiymati\n"
+        "2. Jami naqd pul va umumiy qarz balansi\n"
+        "3. Sektor ko'rsatkichlari bilan solishtirish (Kuchli / Kuchsiz)\n"
+        "4. Yirik investorlar (Dataroma) portfelida bor-yo'qligi\n"
+        "5. Fundamental va texnik tahlil\n\n"
+        "Marhamat, aksiya tikerini yuboring (masalan: `AAPL`, `TSLA`, `MSFT`):"
     )
+    # Hech qanday qo'shimcha tugmalar (reply yoki inline keyboard) qo'shilmadi
     bot.reply_to(message, welcome_text, parse_mode="Markdown")
 
 
@@ -48,14 +54,13 @@ def analyze_any_stock(message):
 
     try:
         stock = tf.Ticker(ticker_symbol)
-        info = stock.info
 
-        if not info or (
-            "currentPrice" not in info and "regularMarketPrice" not in info
-        ):
+        # Xavfsiz tarzda info ni olish
+        info = stock.info
+        if not info or len(info) < 5:
             bot.send_message(
                 message.chat.id,
-                f"❌ `{ticker_symbol}` tikeri bo'yicha ma'lumot topilmadi. Tiker nomini tekshiring.",
+                f"❌ `{ticker_symbol}` tikeri bo'yicha ma'lumot topilmadi yoki Yahoo Finance javob bermadi. Tiker nomini tekshiring va birozdan so'ng qayta urinib ko'ring.",
                 parse_mode="Markdown",
             )
             return
@@ -76,7 +81,7 @@ def analyze_any_stock(message):
         sector = info.get("sector", "Noma'lum sektor")
         industry = info.get("industry", "Noma'lum")
 
-        # 2. Pul va Qarz ma'lumotlari (Yahoo Finance balansidan)
+        # 2. Pul va Qarz ma'lumotlari
         total_cash = info.get("totalCash", 0)
         total_debt = info.get("totalDebt", 0)
 
@@ -91,7 +96,6 @@ def analyze_any_stock(message):
             else "Ma'lumot yo'q"
         )
 
-        # Net Cash (Naqd pul minus Qarz)
         if isinstance(total_cash, (int, float)) and isinstance(
             total_debt, (int, float)
         ):
@@ -111,39 +115,27 @@ def analyze_any_stock(message):
             f"• *Sof Holat (Net):* {net_str}\n\n"
         )
 
-        # 3. Sektor bo'yicha solishtirish (Sektorning o'rtacha ko'rsatkichlari bilan solishtirib kuchli/kuchsizligini aniqlash)
-        # Sektor raqobatchilarini aniqlash uchun oddiy solishtiruv mexanizmi
-        industry_pe_benchmark = (
-            25.0  # Sektor uchun o'rtacha taxminiy P/E me'yori (namuna)
-        )
+        # 3. Sektor bo'yicha solishtirish
+        industry_pe_benchmark = 25.0
         strength_status = "O'rtacha"
 
         if isinstance(pe, (int, float)):
             if pe < industry_pe_benchmark and roe > 0.15:
-                strength_status = (
-                    "🟢 **KUCHLI (Undervalued & High ROE)** - Sektor ichida "
-                    "arzon baholangan va yaxshi foyda keltirmoqda."
-                )
+                strength_status = "🟢 **KUCHLI** - Arzon va yuqori rentabellik."
             elif pe > industry_pe_benchmark:
-                strength_status = (
-                    "🟡 **QIMMAT / O'RTACHA** - P/E ko'rsatkichi sektor "
-                    "o'rtachasidan yuqori, o'sishga talab yuqori."
-                )
+                strength_status = "🟡 **QIMMAT / O'RTACHA**"
             else:
-                strength_status = (
-                    "🔴 **KUCHSIZ / BOSIM OSTIDA** - Rentabellik yoki "
-                    "baholanishi sektorga nisbatan sust."
-                )
+                strength_status = "🔴 **KUCHSIZ / SUST**"
 
         sector_comparison = (
-            f"⚖️ *Sektor va Raqobatchilar bilan Solishtirish:*\n"
-            f"• *Sektor:* {sector} ({industry})\n"
-            f"• *Kompaniya P/E:* {pe} | *Sektor me'yori:* ~{industry_pe_benchmark}\n"
-            f"• *Kompaniya ROE:* {roe_str}\n"
-            f"• *Bozor holati:* {strength_status}\n\n"
+            f"⚖️ *Sektor va Solishtiruv:*\n"
+            f"• *Sektor:* {sector}\n"
+            f"• *P/E:* {pe} | *Sektor me'yori:* ~{industry_pe_benchmark}\n"
+            f"• *ROE:* {roe_str}\n"
+            f"• *Holati:* {strength_status}\n\n"
         )
 
-        # 4. Investorlar bazasi
+        # 4. Yirik investorlar (Dataroma) ma'lumoti
         owners = STOCK_OWNERS.get(ticker_symbol, [])
         owners_text = f"👥 *Yirik Investorlar (Dataroma):*\n"
         if owners:
@@ -159,25 +151,28 @@ def analyze_any_stock(message):
 
         # 5. Fundamental va Texnik qisqacha
         fundamental_info = (
-            f"📈 *Fundamental va Texnik Ma'lumotlar:*\n"
+            f"📈 *Bozor Ma'lumotlari:*\n"
             f"• *Market Cap:* {market_cap_str}\n"
             f"• *Joriy Narx:* ${price}\n"
             f"• *52-Haftalik High/Low:* ${info.get('fiftyTwoWeekHigh', 'N/A')} / ${info.get('fiftyTwoWeekLow', 'N/A')}\n\n"
         )
 
         full_report = (
-            cash_debt_info + sector_comparison + owners_text + fundamental_info
+            cash_debt_info
+            + sector_comparison
+            + owners_text
+            + fundamental_info
         )
         bot.send_message(message.chat.id, full_report, parse_mode="Markdown")
 
     except Exception as e:
+        print(f"Xato yuz berdi: {e}")
         bot.send_message(
             message.chat.id,
-            f"⚠️ Xatolik yuz berdi: {str(e)}",
-            parse_mode="Markdown",
+            "⚠️ Vaqtinchalik xatolik yuz berdi (Serverdan ma'lumot kelmadi). Iltimos, birozdan so'ng qayta urinib ko'ring.",
         )
 
 
 if __name__ == "__main__":
-    print("Bot ishga tushdi...")
+    print("Bot ishga tushdi va ishlashga tayyor...")
     bot.infinity_polling()
