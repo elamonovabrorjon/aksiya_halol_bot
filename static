@@ -1,1 +1,312 @@
-index.html
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pro Stock Analytics Mini App</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --text-color: #f8fafc;
+            --accent-primary: #38bdf8;
+            --accent-secondary: #a855f7;
+            --success: #22c55e;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 10px;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding-bottom: 40px;
+        }
+
+        h1 {
+            text-align: center;
+            font-size: 22px;
+            margin-bottom: 15px;
+            background: linear-gradient(90deg, #38bdf8, #a855f7);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .search-box {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        input {
+            flex: 1;
+            padding: 12px;
+            border-radius: 10px;
+            border: 1px solid #334155;
+            background: #1e293b;
+            color: #fff;
+            font-size: 16px;
+        }
+
+        button {
+            padding: 12px 20px;
+            border-radius: 10px;
+            border: none;
+            background: linear-gradient(135deg, #38bdf8, #6366f1);
+            color: #fff;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.3s;
+        }
+
+        button:hover {
+            opacity: 0.9;
+        }
+
+        /* Rang-barang bo'lim kartochkalari */
+        .card {
+            border-radius: 14px;
+            padding: 16px;
+            margin-bottom: 15px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+
+        /* 1-bo'lim: Asosiy narx va metrikalar (Neon Moviy mavzu) */
+        .card-main {
+            background: linear-gradient(135deg, #1e3a8a, #0f172a);
+            border: 1px solid #3b82f6;
+        }
+
+        /* 2-bo'lim: Texnik ko'rsatkichlar RSI & ATR (To'q Binafsha mavzu) */
+        .card-tech {
+            background: linear-gradient(135deg, #4c1d95, #1e1b4b);
+            border: 1px solid #8b5cf6;
+        }
+
+        /* 3-bo'lim: Sektor gigantlari va Reyting (Zumrad Yashil mavzu) */
+        .card-peers {
+            background: linear-gradient(135deg, #065f46, #022c22);
+            border: 1px solid #10b981;
+        }
+
+        /* 4-bo'lim: Institutsional Fondlar (Quyuq Qizg'ish/Oltin mavzu) */
+        .card-holders {
+            background: linear-gradient(135deg, #78350f, #451a03);
+            border: 1px solid #f59e0b;
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .metric-item {
+            background: rgba(0, 0, 0, 0.25);
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .metric-title {
+            font-size: 12px;
+            color: #94a3b8;
+        }
+
+        .metric-value {
+            font-size: 16px;
+            font-weight: bold;
+            margin-top: 4px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            margin-top: 10px;
+        }
+
+        th, td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+
+        th {
+            color: #94a3b8;
+        }
+
+        .loader {
+            text-align: center;
+            padding: 20px;
+            font-size: 16px;
+            color: #38bdf8;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Pro Stock Analytics</h1>
+        
+        <div class="search-box">
+            <input type="text" id="tickerInput" placeholder="Ticker kiriting (masalan: AAPL, TSLA)..." value="AAPL">
+            <button onclick="fetchStockData()">Tahlil qilish</button>
+        </div>
+
+        <div id="loader" class="loader">Ma'lumotlar yuklanmoqda va tahlil qilinmoqda...</div>
+
+        <div id="content" style="display: none;">
+            <!-- 1. Asosiy ma'lumotlar -->
+            <div class="card card-main">
+                <h3 id="stockName" style="margin: 0 0 10px 0;">Apple Inc. (AAPL)</h3>
+                <div class="grid-2">
+                    <div class="metric-item">
+                        <div class="metric-title">Joriy Narx</div>
+                        <div class="metric-value" id="stockPrice">$0.00</div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="metric-title">Sektor</div>
+                        <div class="metric-value" id="stockSector">-</div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="metric-title">P/E Koeffitsiyenti</div>
+                        <div class="metric-value" id="peRatio">-</div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="metric-title">ROE (Kapital daromadi)</div>
+                        <div class="metric-value" id="roeVal">-</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. Texnik ko'rsatkichlar (RSI & ATR) -->
+            <div class="card card-tech">
+                <h3 style="margin: 0 0 10px 0; color: #c084fc;">⚡ Texnik Ko'rsatkichlar (D1)</h3>
+                <div class="grid-2">
+                    <div class="metric-item">
+                        <div class="metric-title">RSI (14) Indeksi</div>
+                        <div class="metric-value" id="rsiVal">-</div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="metric-title">ATR (O'rtacha o'zgarish)</div>
+                        <div class="metric-value" id="atrVal">-</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. Sektor Raqobatchilari va Reyting -->
+            <div class="card card-peers">
+                <h3 style="margin: 0 0 10px 0; color: #34d399;">🏆 Sektor Gigantlari va Reyting (1-5)</h3>
+                <div style="overflow-x: auto;">
+                    <table id="peersTable">
+                        <thead>
+                            <tr>
+                                <th>Simvol</th>
+                                <th>P/E</th>
+                                <th>ROE%</th>
+                                <th>Ball</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 4. Institutsional Investorlar -->
+            <div class="card card-holders">
+                <h3 style="margin: 0 0 10px 0; color: #fbbf24;">💼 Top Institutsional Fondlar</h3>
+                <div style="overflow-x: auto;">
+                    <table id="holdersTable">
+                        <thead>
+                            <tr>
+                                <th>Fond nomi</th>
+                                <th>Ulush (Soni)</th>
+                                <th>Qiymati ($)</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+
+        async function fetchStockData() {
+            const ticker = document.getElementById('tickerInput').value.trim();
+            if (!ticker) return;
+
+            document.getElementById('loader').style.display = 'block';
+            document.getElementById('content').style.display = 'none';
+
+            try {
+                const response = await fetch(`/api/stock/${ticker}`);
+                if (!response.ok) throw new Error("Aksiya topilmadi");
+                
+                const data = await response.json();
+                const f = data.fundamentals;
+
+                // Ma'lumotlarni joylash
+                document.getElementById('stockName').innerText = `${f.name} (${f.symbol})`;
+                document.getElementById('stockPrice').innerText = `$${f.price}`;
+                document.getElementById('stockSector').innerText = f.sector;
+                document.getElementById('peRatio').innerText = f.peRatio ? f.peRatio.toFixed(2) : 'N/A';
+                document.getElementById('roeVal').innerText = f.roe ? f.roe + '%' : 'N/A';
+                document.getElementById('rsiVal').innerText = f.rsi !== null ? f.rsi : 'N/A';
+                document.getElementById('atrVal').innerText = f.atr !== null ? f.atr : 'N/A';
+
+                // Peers jadvali
+                const peersTbody = document.querySelector('#peersTable tbody');
+                peersTbody.innerHTML = '';
+                data.peers.forEach(p => {
+                    peersTbody.innerHTML += `
+                        <tr>
+                            <td><b>${p.symbol}</b></td>
+                            <td>${p.pe || '-'}</td>
+                            <td>${p.roe}%</td>
+                            <td>⭐️ <b>${p.score}</b></td>
+                        </tr>
+                    `;
+                });
+
+                // Holders jadvali
+                const holdersTbody = document.querySelector('#holdersTable tbody');
+                holdersTbody.innerHTML = '';
+                data.holders.slice(0, 5).forEach(h => {
+                    holdersTbody.innerHTML += `
+                        <tr>
+                            <td>${h.holder}</td>
+                            <td>${h.shares.toLocaleString()}</td>
+                            <td>$${(h.value / 1e6).toFixed(1)}M</td>
+                        </tr>
+                    `;
+                });
+
+                document.getElementById('loader').style.display = 'none';
+                document.getElementById('content').style.display = 'block';
+
+            } catch (error) {
+                alert("Xatolik: " + error.message);
+                document.getElementById('loader').style.display = 'none';
+            }
+        }
+
+        // Sahifa ochilganda avtomatik AAPL ni yuklash
+        window.onload = fetchStockData;
+    </script>
+</body>
+</html>
