@@ -18,7 +18,10 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 
 # Statik fayllar (Mini App HTML) uchun papka
-os.makedirs("static", exist_ok=True)
+try:
+    os.makedirs("static")
+except FileExistsError:
+    pass
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Asosiy sahifa - Mini App ochilganda yuklanadi
