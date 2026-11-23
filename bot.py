@@ -3,6 +3,7 @@
 # ==========================================
 import calendar
 from datetime import datetime
+from http.server import BaseHTTPRequestHandler, HTTPServer
 import html
 from io import StringIO
 import json
@@ -157,6 +158,28 @@ ALIAS_ADMIN = {
     "admin panel",
     "админ панел",
 }
+
+
+class _HealthHandler(BaseHTTPRequestHandler):
+  def do_GET(self):
+    self.send_response(200)
+    self.send_header("Content-type", "text/plain; charset=utf-8")
+    self.end_headers()
+    self.wfile.write(b"OK")
+
+  def do_HEAD(self):
+    self.send_response(200)
+    self.end_headers()
+
+  def log_message(self, format, *args):
+    return
+
+
+def _start_keep_alive_server():
+  port = int(os.environ.get("PORT", 10000))
+  server = HTTPServer(("0.0.0.0", port), _HealthHandler)
+  logger.info("Keep-alive HTTP server %s-portda ishga tushdi...", port)
+  server.serve_forever()
 
 
 def generate_gemini_text(prompt, retries_per_model=2):
@@ -702,7 +725,15 @@ def _safe_get_df(ticker, attr_names):
 
 def extract_fundamental_bundle(ticker, info=None):
   info = info or {}
-  inc = _safe_get_df(ticker, ["financials", "income_stmt", "quarterly_financials", "quarterly_income_stmt"])
+  inc = _safe_get_df(
+      ticker,
+      [
+          "financials",
+          "income_stmt",
+          "quarterly_financials",
+          "quarterly_income_stmt",
+      ],
+  )
   bs = _safe_get_df(ticker, ["balance_sheet", "quarterly_balance_sheet"])
   cf = _safe_get_df(ticker, ["cashflow", "quarterly_cashflow"])
 
@@ -718,7 +749,9 @@ def extract_fundamental_bundle(ticker, info=None):
 
   total_rev_val = info.get("totalRevenue")
   if total_rev_val is None or pd.isna(total_rev_val):
-    total_rev_val = _find_statement_value(inc, ["Total Revenue", "Operating Revenue"])
+    total_rev_val = _find_statement_value(
+        inc, ["Total Revenue", "Operating Revenue"]
+    )
 
   net_inc_val = info.get("netIncomeToCommon")
   if net_inc_val is None or pd.isna(net_inc_val):
@@ -741,10 +774,20 @@ def extract_fundamental_bundle(ticker, info=None):
         ],
     )
 
-  capex_val = _find_statement_value(cf, ["Capital Expenditure", "Capital Expenditures"])
+  capex_val = _find_statement_value(
+      cf, ["Capital Expenditure", "Capital Expenditures"]
+  )
   fcf_val = info.get("freeCashflow")
-  if (fcf_val is None or pd.isna(fcf_val)) and ocf_val is not None and capex_val is not None:
-    fcf_val = float(ocf_val) + float(capex_val) if float(capex_val) < 0 else float(ocf_val) - float(capex_val)
+  if (
+      (fcf_val is None or pd.isna(fcf_val))
+      and ocf_val is not None
+      and capex_val is not None
+  ):
+    fcf_val = (
+        float(ocf_val) + float(capex_val)
+        if float(capex_val) < 0
+        else float(ocf_val) - float(capex_val)
+    )
 
   total_cash_val = info.get("totalCash")
   if total_cash_val is None or pd.isna(total_cash_val):
@@ -761,7 +804,9 @@ def extract_fundamental_bundle(ticker, info=None):
 
   total_debt_val = info.get("totalDebt")
   if total_debt_val is None or pd.isna(total_debt_val):
-    total_debt_val = _find_statement_value(bs, ["Total Debt", "Long Term Debt", "Current Debt"])
+    total_debt_val = _find_statement_value(
+        bs, ["Total Debt", "Long Term Debt", "Current Debt"]
+    )
 
   total_assets_val = info.get("totalAssets")
   if total_assets_val is None or pd.isna(total_assets_val):
@@ -782,7 +827,9 @@ def extract_fundamental_bundle(ticker, info=None):
   }
 
 
-def build_cash_staff_revenue_mix_block(ticker, info, total_rev_val, net_inc_val, bundle=None):
+def build_cash_staff_revenue_mix_block(
+    ticker, info, total_rev_val, net_inc_val, bundle=None
+):
   bundle = bundle or extract_fundamental_bundle(ticker, info)
   inc = bundle.get("inc")
   cash_val = bundle.get("total_cash_val")
@@ -821,14 +868,19 @@ def build_cash_staff_revenue_mix_block(ticker, info, total_rev_val, net_inc_val,
     emp_note = f", xodimlar soni: <b>{int(emp_cnt):,}</b>" if emp_cnt else ""
     staff_line = (
         f"• <b>Ishchilarga / xodimlarga:</b> hisobotda alohida ko'rsatilmagan "
-        f"(SG&A ichida bo'lishi mumkin{emp_note})"
+        f"(SG&amp;A ichida bo'lishi mumkin{emp_note})"
     )
 
   tax_val = _find_statement_value(inc, ["Tax Provision", "Income Tax Expense"])
   if tax_val is not None and not pd.isna(tax_val):
     tax_f = abs(float(tax_val))
-    tax_pct_str = f" (Tushumning <b>{(tax_f / rev_f) * 100:.2f}%</b>)" if rev_f else ""
-    staff_line += f"\n• <b>Soliq (Income Tax):</b> <b>{format_large_number(tax_f)}</b>{tax_pct_str}"
+    tax_pct_str = (
+        f" (Tushumning <b>{(tax_f / rev_f) * 100:.2f}%</b>)" if rev_f else ""
+    )
+    staff_line += (
+        f"\n• <b>Soliq (Income Tax):</b>"
+        f" <b>{format_large_number(tax_f)}</b>{tax_pct_str}"
+    )
 
   mix_lines = []
   gross_profit = info.get("grossProfits")
@@ -868,7 +920,10 @@ def build_cash_staff_revenue_mix_block(ticker, info, total_rev_val, net_inc_val,
   rev_mix_text = (
       "\n".join(mix_lines)
       if mix_lines
-      else "  - yfinance da segment/foyda satrlari ko'rsatilmagan (10-K/10-Q ni tekshiring)"
+      else (
+          "  - yfinance da segment/foyda satrlari ko'rsatilmagan (10-K/10-Q ni"
+          " tekshiring)"
+      )
   )
 
   return (
@@ -955,7 +1010,8 @@ def evaluate_strategy_signal(
         True,
         f"🎯 <b>AI ALGORITMIK SIGNAL — {ticker_symbol}</b>\n"
         f"• Strategiya: <b>{strategy_name}</b>\n"
-        f"• P/E: <b>{float(pe_val):.2f}</b> (10–25) | RSI(14): <b>{float(rsi_val):.2f}</b> (20–30)\n"
+        f"• P/E: <b>{float(pe_val):.2f}</b> (10–25) | RSI(14):"
+        f" <b>{float(rsi_val):.2f}</b> (20–30)\n"
         f"• Joriy narx: <b>${float(price):.2f}</b>\n"
         f"• Stop / Tayanch (1.5x ATR): <b>${stop_loss:.2f}</b>\n"
         f"• 1-Maqsad (2.0x ATR): <b>${target_1:.2f}</b> | "
@@ -1028,7 +1084,7 @@ def build_evaluation_summary(
       and not pd.isna(total_debt_val)
   ):
     dta = (float(total_debt_val) / float(total_assets_val)) * 100
-    st = "Yaxshi (<=30%)" if dta <= 30 else "Yuqori (>30%)"
+    st = "Yaxshi (&lt;=30%)" if dta <= 30 else "Yuqori (&gt;30%)"
     good_bad_lines.append(f"• Qarz/Aktivlar ({dta:.2f}%): <b>{st}</b>")
     (positives if dta <= 30 else negatives).append(f"Qarz/Aktiv: {dta:.2f}%")
 
@@ -1039,7 +1095,7 @@ def build_evaluation_summary(
       and not pd.isna(total_cash_val)
   ):
     cta = (float(total_cash_val) / float(total_assets_val)) * 100
-    st = "Me'yorda (<=30%)" if cta <= 30 else "Yuqori (>30%)"
+    st = "Me'yorda (&lt;=30%)" if cta <= 30 else "Yuqori (&gt;30%)"
     good_bad_lines.append(f"• Naqd/Aktivlar ({cta:.2f}%): <b>{st}</b>")
 
   if (
@@ -1049,7 +1105,7 @@ def build_evaluation_summary(
       and not pd.isna(total_debt_val)
   ):
     dtm = (float(total_debt_val) / float(mcap_val)) * 100
-    st = "Yaxshi (<=33%)" if dtm <= 33 else "Yuqori (>33%)"
+    st = "Yaxshi (&lt;=33%)" if dtm <= 33 else "Yuqori (&gt;33%)"
     good_bad_lines.append(f"• Qarz/MCap ({dtm:.2f}%): <b>{st}</b>")
 
   if (
@@ -1219,7 +1275,10 @@ def get_stock_analysis(ticker_symbol, quota_info=None):
             f"Quyidagi kompaniya tavsifini 2 ta sodda gap bilan "
             f"o'zbek tilida qisqacha ber:\n{summary_en}"
         )
-        or f"{ticker_symbol} bo'yicha qisqa tavsif 10-K/10-Q rasmiy hisobotida keltirilgan."
+        or (
+            f"{ticker_symbol} bo'yicha qisqa tavsif 10-K/10-Q rasmiy hisobotida"
+            " keltirilgan."
+        )
     )
   else:
     history_uz_raw = (
@@ -1322,8 +1381,9 @@ def get_stock_analysis(ticker_symbol, quota_info=None):
     limit_line = "👑 <b>Tarif:</b> VIP (Cheklovsiz)\n"
   elif quota_info:
     limit_line = (
-        f"🎟 <b>Limit:</b> Bugun {quota_info['daily_left']}/{DAILY_FREE_LIMIT} qoldi | "
-        f"Oy {quota_info['monthly_left']}/{MONTHLY_FREE_LIMIT} qoldi\n"
+        f"🎟 <b>Limit:</b> Bugun {quota_info['daily_left']}/{DAILY_FREE_LIMIT}"
+        f" qoldi | Oy {quota_info['monthly_left']}/{MONTHLY_FREE_LIMIT}"
+        " qoldi\n"
     )
   else:
     limit_line = ""
@@ -1352,8 +1412,8 @@ def get_stock_analysis(ticker_symbol, quota_info=None):
       f"• <b>OCF:</b> {ocf_str}\n"
       f"• <b>Naqd/Qarz/Aktiv:</b> {total_cash} / {total_debt} / {total_assets}\n"
       f"• <b>D/E:</b> {debt_to_equity}\n"
-      f"• <b>Skrining:</b> Qarz/Aktiv {dta_str} (<=30%) | "
-      f"Naqd/Aktiv {cta_str} (<=30%) | Qarz/MCap {dtm_str} (<=33%)\n\n"
+      f"• <b>Skrining:</b> Qarz/Aktiv {dta_str} (&lt;=30%) | "
+      f"Naqd/Aktiv {cta_str} (&lt;=30%) | Qarz/MCap {dtm_str} (&lt;=33%)\n\n"
       f"💰 <b>DIVIDENDLAR:</b>\n"
       f"• <b>Yield:</b> {div_yield}\n"
       f"• <b>Payout:</b> {payout_ratio}\n\n"
@@ -1621,8 +1681,9 @@ def send_welcome(message):
   safe_send_message(
       message.chat.id,
       f"Assalomu alaykum! 📈 ({vip_badge})\n"
-      "Aksiya tikerini yuboring (masalan: <code>AAPL</code>, <code>NVDA</code>, <code>INTC</code>) "
-      "yoki quyidagi tugmalardan birini tanlang:\n"
+      "Aksiya tikerini yuboring (masalan:"
+      " <code>AAPL</code>, <code>NVDA</code>, <code>INTC</code>) yoki"
+      " quyidagi tugmalardan birini tanlang:\n"
       f"Admin: @{ADMIN_LINK}",
       reply_markup=get_main_keyboard(),
   )
@@ -1637,8 +1698,9 @@ def handle_btn_ai_analysis(message):
   safe_send_message(
       message.chat.id,
       "🧠 <b>AI Tahlil</b> rejimi faol.\n"
-      "To'liq fundamental va texnik tahlil olish uchun aksiya tikerini yuboring "
-      "(masalan: <code>AAPL</code>, <code>NVDA</code>, <code>INTC</code>, <code>MU</code>).",
+      "To'liq fundamental va texnik tahlil olish uchun aksiya tikerini"
+      " yuboring (masalan:"
+      " <code>AAPL</code>, <code>NVDA</code>, <code>INTC</code>, <code>MU</code>).",
       reply_markup=get_main_keyboard(),
   )
 
@@ -1652,8 +1714,8 @@ def handle_btn_algo_signals(message):
   safe_send_message(
       message.chat.id,
       "📊 <b>Algoritmik signallar</b> rejimi faol.\n"
-      "SMA20/50, RSI(14), ATR(14) va AI strategiya signalini ko'rish uchun "
-      "tiker yuboring (masalan: <code>AAPL</code> yoki <code>NVDA</code>).",
+      "SMA20/50, RSI(14), ATR(14) va AI strategiya signalini ko'rish uchun"
+      " tiker yuboring (masalan: <code>AAPL</code> yoki <code>NVDA</code>).",
       reply_markup=get_main_keyboard(),
   )
 
@@ -1667,8 +1729,8 @@ def handle_btn_ai_help(message):
   safe_send_message(
       message.chat.id,
       "💬 <b>AI Yordam</b> rejimi faol.\n"
-      "Savolingizni erkin yozing — moliya, aksiyalar yoki indikatorlar bo'yicha "
-      "javob beraman.",
+      "Savolingizni erkin yozing — moliya, aksiyalar yoki indikatorlar bo'yicha"
+      " javob beraman.",
       reply_markup=get_main_keyboard(),
   )
 
@@ -1748,8 +1810,10 @@ def handle_btn_admin(message):
   safe_send_message(
       message.chat.id,
       f"⚙️ <b>Admin Panel</b> (@{ADMIN_LINK})\n"
-      f"• VIP foydalanuvchilar: <b>{vip_count}</b> | Kanal: <code>{CHANNEL_ID}</code>\n"
-      f"• Oddiy limit: kuniga <b>{DAILY_FREE_LIMIT}</b>, oyiga <b>{MONTHLY_FREE_LIMIT}</b>\n\n"
+      f"• VIP foydalanuvchilar: <b>{vip_count}</b> | Kanal:"
+      f" <code>{CHANNEL_ID}</code>\n"
+      f"• Oddiy limit: kuniga <b>{DAILY_FREE_LIMIT}</b>, oyiga"
+      f" <b>{MONTHLY_FREE_LIMIT}</b>\n\n"
       f"Buyruq yuboring:\n"
       f"• <code>vip 123456789</code> — VIP berish\n"
       f"• <code>unvip 123456789</code> — VIP olish\n"
@@ -1818,7 +1882,10 @@ def handle_message(message):
           (
               "✅ Xabar kanalga yuborildi."
               if ok
-              else "⚠️ Kanalga yuborilmadi — bot kanalda admin ekanligini tekshiring."
+              else (
+                  "⚠️ Kanalga yuborilmadi — bot kanalda admin ekanligini"
+                  " tekshiring."
+              )
           ),
       )
       return
@@ -1876,8 +1943,8 @@ def handle_message(message):
   if not ticker_symbol.isalpha() or len(ticker_symbol) > 6:
     safe_send_message(
         message.chat.id,
-        "Aksiya tikerini kiriting (masalan: <code>AAPL</code>) yoki menyudagi "
-        "tugmalardan birini bosing.",
+        "Aksiya tikerini kiriting (masalan: <code>AAPL</code>) yoki menyudagi"
+        " tugmalardan birini bosing.",
         reply_markup=get_main_keyboard(),
     )
     return
@@ -1981,7 +2048,8 @@ def handle_message(message):
     logger.exception("Tahlil xatosi: %s", e)
     safe_send_message(
         message.chat.id,
-        f"⚠️ <b>{ticker_symbol}</b> tahlilida xatolik: <code>{html.escape(str(e))}</code>",
+        f"⚠️ <b>{ticker_symbol}</b> tahlilida xatolik:"
+        f" <code>{html.escape(str(e))}</code>",
     )
 
 
@@ -2026,9 +2094,10 @@ def handle_news_callback(call):
       return
 
     prompt = (
-        f"Quyidagi {ticker_symbol} aksiyasiga oid yangiliklarni o'zbek tiliga tarjima qil. "
-        f"Har birini qisqa va tushunarli yoz, havolani <a href='...'>Manba</a> ko'rinishida qoldir. "
-        f"Faqat tayyor Telegram HTML matnini qaytar:\n\n{raw_news}"
+        f"Quyidagi {ticker_symbol} aksiyasiga oid yangiliklarni o'zbek tiliga"
+        " tarjima qil. Har birini qisqa va tushunarli yoz, havolani <a"
+        " href='...'>Manba</a> ko'rinishida qoldir. Faqat tayyor Telegram HTML"
+        f" matnini qaytar:\n\n{raw_news}"
     )
     ai_response_text = generate_gemini_text(prompt)
     news_msg = (
@@ -2045,6 +2114,7 @@ def handle_news_callback(call):
 
 
 def run_bot_forever():
+  threading.Thread(target=_start_keep_alive_server, daemon=True).start()
   threading.Thread(target=_monthly_scheduler_loop, daemon=True).start()
   logger.info("Bot muvaffaqiyatli ishga tushdi...")
   while True:
