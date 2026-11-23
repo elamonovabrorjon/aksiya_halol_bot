@@ -1,7 +1,8 @@
-fastapi
-uvicorn
-python-telegram-bot==20.7
+pyTelegramBotAPI
+google-genai
 yfinance
 pandas
 numpy
 requests
+lxml
+html5lib
