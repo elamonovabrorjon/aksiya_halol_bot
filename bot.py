@@ -2555,7 +2555,7 @@ def handle_message(message):
                 img_data,
                 caption=f"📈 {ticker_symbol} — Kunlik (D1) grafik",
             )
-        except Exception:
+     except Exception:
             pass
 
     chunks = split_html_message(report, limit=3900)
