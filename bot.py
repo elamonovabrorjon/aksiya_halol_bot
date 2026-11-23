@@ -1947,8 +1947,8 @@ def get_stock_analysis(ticker_symbol, quota_info=None):
       f"{eval_block}"
   )
 
-  _record_monthly_activity(kind="analysis", ticker=ticker_symbol)
-    divs_series = None
+  _record_monthly_activity(kind="analysis", ticker=ticker_symbol) 
+      divs_series = None
     try:
       divs_series = ticker.dividends
     except Exception:
