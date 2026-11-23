@@ -2527,9 +2527,9 @@ def handle_message(message):
 
   try:
     res = get_stock_analysis(ticker_symbol, quota_info=quota_info)
-    if not res:
-  return safe_send_message(message.chat.id, f"❌ <b>{ticker_symbol}</b> bo'yicha ma'lumot topilmadi.", parse_mode="HTML")
-    report, chart_url, is_matched, strat_info = res    
+        if not res:
+            return safe_send_message(message.chat.id, f"❌ <b>{ticker_symbol}</b> bo'yicha ma'lumot topilmadi.", parse_mode="HTML")
+        report, chart_url, is_matched, strat_info = res    
       try:
         bot.delete_message(message.chat.id, wait_msg.message_id)
       except Exception:
