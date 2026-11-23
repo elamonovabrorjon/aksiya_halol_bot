@@ -1948,9 +1948,21 @@ def get_stock_analysis(ticker_symbol, quota_info=None):
   )
 
   _record_monthly_activity(kind="analysis", ticker=ticker_symbol)
-  return report, chart_url, is_matched, strat_info
+      divs_series = None
+    try:
+      divs_series = ticker.dividends
+    except Exception:
+      divs_series = None
 
-
+    return build_full_no_na_report(
+        ticker_symbol=ticker_symbol,
+        info=info or {},
+        hist=hist,
+        inc=inc,
+        bs=bs,
+        cf=cf,
+        divs_series=divs_series,
+    )
 def build_algo_signal(ticker_symbol):
   ticker = yf.Ticker(ticker_symbol)
   try:
