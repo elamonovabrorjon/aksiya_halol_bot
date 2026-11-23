@@ -2547,8 +2547,8 @@ def handle_message(message):
             callback_data=f"news_{ticker_symbol}",
         )
     )
-      try:
-      headers = {"User-Agent": "Mozilla/5.0"}
+     try:
+    headers = {"User-Agent": "Mozilla/5.0"}
       img_data = requests.get(chart_url, headers=headers, timeout=10).content
       bot.send_photo(
           message.chat.id,
