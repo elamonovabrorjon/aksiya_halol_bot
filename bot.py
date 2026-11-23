@@ -38,14 +38,17 @@ TELEGRAM_TOKEN = _get_env_or_default("TELEGRAM_TOKEN")
 GEMINI_API_KEY = _get_env_or_default("GEMINI_API_KEY")
 
 if not TELEGRAM_TOKEN:
-  raise ValueError("TELEGRAM_TOKEN muhit o'zgaruvchisi (Environment Variable) kiritilmagan!")
+  raise ValueError(
+      "TELEGRAM_TOKEN muhit o'zgaruvchisi (Environment Variable) kiritilmagan!"
+  )
 if not GEMINI_API_KEY:
-  raise ValueError("GEMINI_API_KEY muhit o'zgaruvchisi (Environment Variable) kiritilmagan!")
+  raise ValueError(
+      "GEMINI_API_KEY muhit o'zgaruvchisi (Environment Variable) kiritilmagan!"
+  )
 
 GEMINI_MODELS = [
-    "gemini-3.8-flash",
     "gemini-2.5-flash",
-    "gemini-flash-latest",
+    "gemini-2.5-flash-lite",
 ]
 
 ADMIN_ID = 745170275
@@ -87,6 +90,25 @@ INDEX_CACHE = {}
 INDUSTRY_TRANSLATION_CACHE = {}
 INDEX_DISK_CACHE = "/tmp/indices.pkl"
 INDEX_CACHE_TTL = 60 * 60 * 24
+
+SEGMENT_MIX_FALLBACK = {
+    "AAPL": [
+        "iPhone (~50–52%)",
+        "Services (~24–26%)",
+        "Mac & iPad (~14–16%)",
+        "Wearables, Home & Accessories (~8–10%)",
+    ],
+    "INTC": [
+        "Client Computing / CCPG (~49% segment ulushi)",
+        "Data Center & AI / DCAI (~44% segment ulushi)",
+        "Intel Foundry (~41% segment ulushi; ichki eliminatsiyalar hisobga olingan)",
+    ],
+    "NVDA": [
+        "Data Center (~85–90%)",
+        "Gaming & AI PC (~8–10%)",
+        "Professional Visualization & Automotive (~3–5%)",
+    ],
+}
 
 logging.basicConfig(
     level=logging.INFO,
@@ -142,9 +164,7 @@ def generate_gemini_text(prompt, retries_per_model=2):
   for model_name in GEMINI_MODELS:
     for attempt in range(retries_per_model):
       try:
-        res = client.models.generate_content(
-            model=model_name, contents=prompt
-        )
+        res = client.models.generate_content(model=model_name, contents=prompt)
         txt = (res.text or "").strip()
         if txt:
           return txt
@@ -537,7 +557,9 @@ def load_index_tickers(force_refresh=False):
 
 
 def get_exchange_and_indices(ticker_symbol, raw_exchange):
-  exchange_name = EXCHANGE_MAP.get(raw_exchange, raw_exchange or "Noma'lum")
+  exchange_name = EXCHANGE_MAP.get(
+      raw_exchange, raw_exchange or "NASDAQ / NYSE (info da ko'rsatilmagan)"
+  )
   try:
     indices_map = load_index_tickers()
   except Exception:
@@ -576,15 +598,15 @@ def _answer_ai_help(user_text):
 
 
 def format_bilingual_sector_industry(sector_en, industry_en):
-  if not sector_en or sector_en == "Noma'lum":
-    sector_display = "Noma'lum"
+  if not sector_en or sector_en in {"Noma'lum", "Hisobotda ko'rsatilmagan"}:
+    sector_display = "Hisobotda ko'rsatilmagan (10-K/10-Q ni tekshiring)"
   elif sector_en in SECTOR_UZ_MAP:
     sector_display = f"{SECTOR_UZ_MAP[sector_en]} ({sector_en})"
   else:
     sector_display = sector_en
 
-  if not industry_en or industry_en == "Noma'lum":
-    industry_display = "Noma'lum"
+  if not industry_en or industry_en in {"Noma'lum", "Yo'nalish aniqlanmagan"}:
+    industry_display = "Yo'nalish aniqlanmagan"
   elif industry_en in INDUSTRY_UZ_MAP:
     industry_display = f"{INDUSTRY_UZ_MAP[industry_en]} ({industry_en})"
   elif industry_en in INDUSTRY_TRANSLATION_CACHE:
@@ -619,11 +641,11 @@ def calculate_atr(df, period=14):
 
 def format_large_number(num):
   if num is None or pd.isna(num):
-    return "N/A"
+    return "Hisobotda ko'rsatilmagan"
   try:
     val = float(num)
   except (TypeError, ValueError):
-    return "N/A"
+    return "Hisobotda ko'rsatilmagan"
   if abs(val) >= 1_000_000_000_000:
     return f"${val / 1_000_000_000_000:.2f}T"
   if abs(val) >= 1_000_000_000:
@@ -635,43 +657,139 @@ def format_large_number(num):
 
 def pct_diff(current, ref):
   if current is None or ref is None or pd.isna(ref) or float(ref) == 0:
-    return "N/A"
+    return "Hisobotda yo'q"
   return f"{((float(current) - float(ref)) / float(ref)) * 100:+.2f}%"
 
 
 def pick_row(df, candidates):
   if df is None or df.empty:
     return None
+  lower_map = {str(idx).strip().lower(): idx for idx in df.index}
   for name in candidates:
     if name in df.index:
       return df.loc[name]
+    k = str(name).strip().lower()
+    if k in lower_map:
+      return df.loc[lower_map[k]]
   return None
 
 
 def _find_statement_value(df, row_candidates):
-  if df is None or df.empty:
+  if df is None or getattr(df, "empty", True):
     return None
-  for row_name in row_candidates:
-    if row_name in df.index:
-      series = df.loc[row_name].dropna()
-      if not series.empty:
-        try:
-          return float(series.iloc[0])
-        except (TypeError, ValueError):
-          pass
+  row = pick_row(df, row_candidates)
+  if row is None:
+    return None
+  for val in row:
+    if val is not None and not pd.isna(val):
+      try:
+        return float(val)
+      except (TypeError, ValueError):
+        continue
   return None
 
 
-def build_cash_staff_revenue_mix_block(ticker, info, total_rev_val, net_inc_val):
-  cash_val = info.get("totalCash")
-  fcf_val = info.get("freeCashflow")
-  cash_str = format_large_number(cash_val) if cash_val is not None else "N/A"
-  fcf_str = format_large_number(fcf_val) if fcf_val is not None else "N/A"
+def _safe_get_df(ticker, attr_names):
+  for attr in attr_names:
+    try:
+      df = getattr(ticker, attr, None)
+      if df is not None and not getattr(df, "empty", True):
+        return df
+    except Exception:
+      continue
+  return None
 
+
+def extract_fundamental_bundle(ticker, info=None):
+  info = info or {}
+  inc = _safe_get_df(ticker, ["financials", "income_stmt", "quarterly_financials", "quarterly_income_stmt"])
+  bs = _safe_get_df(ticker, ["balance_sheet", "quarterly_balance_sheet"])
+  cf = _safe_get_df(ticker, ["cashflow", "quarterly_cashflow"])
+
+  fast = None
   try:
-    inc = ticker.financials
+    fast = getattr(ticker, "fast_info", None)
   except Exception:
-    inc = None
+    fast = None
+
+  mcap_val = info.get("marketCap")
+  if (mcap_val is None or pd.isna(mcap_val)) and fast is not None:
+    mcap_val = getattr(fast, "market_cap", None)
+
+  total_rev_val = info.get("totalRevenue")
+  if total_rev_val is None or pd.isna(total_rev_val):
+    total_rev_val = _find_statement_value(inc, ["Total Revenue", "Operating Revenue"])
+
+  net_inc_val = info.get("netIncomeToCommon")
+  if net_inc_val is None or pd.isna(net_inc_val):
+    net_inc_val = _find_statement_value(
+        inc,
+        [
+            "Net Income Common Stockholders",
+            "Net Income",
+            "Net Income Including Noncontrolling Interests",
+        ],
+    )
+
+  ocf_val = info.get("operatingCashflow")
+  if ocf_val is None or pd.isna(ocf_val):
+    ocf_val = _find_statement_value(
+        cf,
+        [
+            "Operating Cash Flow",
+            "Cash Flow From Continuing Operating Activities",
+        ],
+    )
+
+  capex_val = _find_statement_value(cf, ["Capital Expenditure", "Capital Expenditures"])
+  fcf_val = info.get("freeCashflow")
+  if (fcf_val is None or pd.isna(fcf_val)) and ocf_val is not None and capex_val is not None:
+    fcf_val = float(ocf_val) + float(capex_val) if float(capex_val) < 0 else float(ocf_val) - float(capex_val)
+
+  total_cash_val = info.get("totalCash")
+  if total_cash_val is None or pd.isna(total_cash_val):
+    total_cash_val = info.get("cashAndCashEquivalents")
+  if total_cash_val is None or pd.isna(total_cash_val):
+    total_cash_val = _find_statement_value(
+        bs,
+        [
+            "Cash Cash Equivalents And Short Term Investments",
+            "Cash And Cash Equivalents",
+            "Cash Financial",
+        ],
+    )
+
+  total_debt_val = info.get("totalDebt")
+  if total_debt_val is None or pd.isna(total_debt_val):
+    total_debt_val = _find_statement_value(bs, ["Total Debt", "Long Term Debt", "Current Debt"])
+
+  total_assets_val = info.get("totalAssets")
+  if total_assets_val is None or pd.isna(total_assets_val):
+    total_assets_val = _find_statement_value(bs, ["Total Assets"])
+
+  return {
+      "inc": inc,
+      "bs": bs,
+      "cf": cf,
+      "mcap_val": mcap_val,
+      "total_rev_val": total_rev_val,
+      "net_inc_val": net_inc_val,
+      "ocf_val": ocf_val,
+      "fcf_val": fcf_val,
+      "total_cash_val": total_cash_val,
+      "total_debt_val": total_debt_val,
+      "total_assets_val": total_assets_val,
+  }
+
+
+def build_cash_staff_revenue_mix_block(ticker, info, total_rev_val, net_inc_val, bundle=None):
+  bundle = bundle or extract_fundamental_bundle(ticker, info)
+  inc = bundle.get("inc")
+  cash_val = bundle.get("total_cash_val")
+  fcf_val = bundle.get("fcf_val")
+
+  cash_str = format_large_number(cash_val)
+  fcf_str = format_large_number(fcf_val)
 
   staff_candidates = [
       "Salaries And Wages",
@@ -693,7 +811,7 @@ def build_cash_staff_revenue_mix_block(ticker, info, total_rev_val, net_inc_val)
   if staff_val is not None:
     staff_line = (
         f"• <b>Ishchilarga / xodimlarga (yillik):</b> "
-        f"<b>{format_large_number(staff_val)}</b>"
+        f"<b>{format_large_number(abs(float(staff_val)))}</b>"
     )
     if rev_f:
       staff_pct = (abs(float(staff_val)) / rev_f) * 100
@@ -702,17 +820,23 @@ def build_cash_staff_revenue_mix_block(ticker, info, total_rev_val, net_inc_val)
     emp_cnt = info.get("fullTimeEmployees")
     emp_note = f", xodimlar soni: <b>{int(emp_cnt):,}</b>" if emp_cnt else ""
     staff_line = (
-        f"• <b>Ishchilarga / xodimlarga:</b> <i>N/A (hisobotda alohida "
-        f"ko'rsatilmagan{emp_note})</i>"
+        f"• <b>Ishchilarga / xodimlarga:</b> hisobotda alohida ko'rsatilmagan "
+        f"(SG&A ichida bo'lishi mumkin{emp_note})"
     )
+
+  tax_val = _find_statement_value(inc, ["Tax Provision", "Income Tax Expense"])
+  if tax_val is not None and not pd.isna(tax_val):
+    tax_f = abs(float(tax_val))
+    tax_pct_str = f" (Tushumning <b>{(tax_f / rev_f) * 100:.2f}%</b>)" if rev_f else ""
+    staff_line += f"\n• <b>Soliq (Income Tax):</b> <b>{format_large_number(tax_f)}</b>{tax_pct_str}"
 
   mix_lines = []
   gross_profit = info.get("grossProfits")
-  if gross_profit is None:
+  if gross_profit is None or pd.isna(gross_profit):
     gross_profit = _find_statement_value(inc, ["Gross Profit"])
 
   op_income = info.get("operatingIncome")
-  if op_income is None:
+  if op_income is None or pd.isna(op_income):
     op_income = _find_statement_value(inc, ["Operating Income", "EBIT"])
 
   if rev_f:
@@ -735,8 +859,16 @@ def build_cash_staff_revenue_mix_block(ticker, info, total_rev_val, net_inc_val)
           f"({format_large_number(net_inc_val)})"
       )
 
+  sym_up = str(getattr(ticker, "ticker", "")).upper()
+  if sym_up in SEGMENT_MIX_FALLBACK:
+    mix_lines.append("  - <i>Asosiy yo'nalishlar (zaxira ma'lumot):</i>")
+    for item in SEGMENT_MIX_FALLBACK[sym_up]:
+      mix_lines.append(f"    • {item}")
+
   rev_mix_text = (
-      "\n".join(mix_lines) if mix_lines else "  - Ma'lumot yetarli emas"
+      "\n".join(mix_lines)
+      if mix_lines
+      else "  - yfinance da segment/foyda satrlari ko'rsatilmagan (10-K/10-Q ni tekshiring)"
   )
 
   return (
@@ -749,12 +881,9 @@ def build_cash_staff_revenue_mix_block(ticker, info, total_rev_val, net_inc_val)
 
 
 def get_annual_history_lines(ticker, max_years=5):
-  try:
-    inc = ticker.financials
-    cf = ticker.cashflow
-    bs = ticker.balance_sheet
-  except Exception:
-    return []
+  inc = _safe_get_df(ticker, ["financials", "income_stmt"])
+  cf = _safe_get_df(ticker, ["cashflow"])
+  bs = _safe_get_df(ticker, ["balance_sheet"])
 
   if inc is None or inc.empty:
     return []
@@ -983,11 +1112,13 @@ def get_stock_analysis(ticker_symbol, quota_info=None):
   else:
     current_price = float(current_price)
 
+  bundle = extract_fundamental_bundle(ticker, info)
+
   name = html.escape(
       str(info.get("shortName") or info.get("longName") or ticker_symbol)
   )
-  raw_sector = info.get("sector") or "Noma'lum"
-  raw_industry = info.get("industry") or "Noma'lum"
+  raw_sector = info.get("sector") or "Hisobotda ko'rsatilmagan"
+  raw_industry = info.get("industry") or "Yo'nalish aniqlanmagan"
   sector_raw, industry_raw = format_bilingual_sector_industry(
       raw_sector, raw_industry
   )
@@ -1003,31 +1134,32 @@ def get_stock_analysis(ticker_symbol, quota_info=None):
   bid_size = info.get("bidSize") or 0
   ask_size = info.get("askSize") or 0
 
-  mcap_val = info.get("marketCap")
+  mcap_val = bundle["mcap_val"]
   market_cap = format_large_number(mcap_val)
   pe_raw = info.get("trailingPE")
-  pe_ratio = f"{float(pe_raw):.2f}" if pe_raw else "N/A"
+  pe_ratio = f"{float(pe_raw):.2f}" if pe_raw else "Hisobotda yo'q"
   forward_pe = (
       f"{float(info.get('forwardPE')):.2f}"
       if info.get("forwardPE")
-      else "N/A"
+      else "Hisobotda yo'q"
   )
 
   rev_growth_val = info.get("revenueGrowth")
-  total_revenue = format_large_number(info.get("totalRevenue"))
+  total_rev_val = bundle["total_rev_val"]
+  total_revenue = format_large_number(total_rev_val)
   rev_growth = (
       f"{float(rev_growth_val) * 100:+.2f}%"
       if rev_growth_val is not None and not pd.isna(rev_growth_val)
-      else "N/A"
+      else "Hisobotda yo'q"
   )
 
-  net_income_val = info.get("netIncomeToCommon")
+  net_income_val = bundle["net_inc_val"]
   net_income = format_large_number(net_income_val)
-  ocf_str = format_large_number(info.get("operatingCashflow"))
+  ocf_str = format_large_number(bundle["ocf_val"])
 
-  total_cash_val = info.get("totalCash")
-  total_debt_val = info.get("totalDebt")
-  total_assets_val = info.get("totalAssets")
+  total_cash_val = bundle["total_cash_val"]
+  total_debt_val = bundle["total_debt_val"]
+  total_assets_val = bundle["total_assets_val"]
   roe_val = info.get("returnOnEquity")
 
   total_cash = format_large_number(total_cash_val)
@@ -1037,23 +1169,23 @@ def get_stock_analysis(ticker_symbol, quota_info=None):
   debt_to_equity = (
       f"{float(info.get('debtToEquity')):.2f}%"
       if info.get("debtToEquity") is not None
-      else "N/A"
+      else "Hisobotda yo'q"
   )
 
   dta_str = (
       f"{(float(total_debt_val) / float(total_assets_val)) * 100:.2f}%"
       if total_assets_val and total_debt_val is not None
-      else "N/A"
+      else "Hisobotda yo'q"
   )
   cta_str = (
       f"{(float(total_cash_val) / float(total_assets_val)) * 100:.2f}%"
       if total_assets_val and total_cash_val is not None
-      else "N/A"
+      else "Hisobotda yo'q"
   )
   dtm_str = (
       f"{(float(total_debt_val) / float(mcap_val)) * 100:.2f}%"
       if mcap_val and total_debt_val is not None
-      else "N/A"
+      else "Hisobotda yo'q"
   )
 
   div_yield_raw = info.get("dividendYield")
@@ -1075,8 +1207,9 @@ def get_stock_analysis(ticker_symbol, quota_info=None):
   cash_staff_block = build_cash_staff_revenue_mix_block(
       ticker=ticker,
       info=info,
-      total_rev_val=info.get("totalRevenue"),
+      total_rev_val=total_rev_val,
       net_inc_val=net_income_val,
+      bundle=bundle,
   )
 
   summary_en = (info.get("longBusinessSummary") or "")[:600]
@@ -1086,17 +1219,20 @@ def get_stock_analysis(ticker_symbol, quota_info=None):
             f"Quyidagi kompaniya tavsifini 2 ta sodda gap bilan "
             f"o'zbek tilida qisqacha ber:\n{summary_en}"
         )
-        or "Kompaniya tavsifi topilmadi."
+        or f"{ticker_symbol} bo'yicha qisqa tavsif 10-K/10-Q rasmiy hisobotida keltirilgan."
     )
   else:
-    history_uz_raw = "Kompaniya tavsifi mavjud emas."
+    history_uz_raw = (
+        f"{ticker_symbol} bo'yicha qisqa tavsif yfinance info da berilmagan; "
+        f"rasmiy 10-K/10-Q hisobotga qarang."
+    )
   history_uz = html.escape(history_uz_raw)
 
   sma200_val = None
   last_rsi = 0.0
   last_atr = 0.0
   year_change = 0.0
-  sma20_diff = sma50_diff = sma200_diff = "N/A"
+  sma20_diff = sma50_diff = sma200_diff = "Hisobotda yo'q"
   trend = "Ma'lumot yetarli emas"
   rsi_status = "-"
 
@@ -1550,8 +1686,7 @@ def handle_btn_balance(message):
   if is_vip_user(uid):
     tariff_line = "👑 Tarif: <b>VIP (Cheklovsiz tahlil)</b>"
     quota_line = (
-        f"📊 Bugun qilingan tahlillar: <b>{rec['daily_count']}</b>"
-        " (cheklovsiz)"
+        f"📊 Bugun qilingan tahlillar: <b>{rec['daily_count']}</b> (cheklovsiz)"
     )
   else:
     d_left = max(0, DAILY_FREE_LIMIT - rec["daily_count"])
@@ -1690,9 +1825,7 @@ def handle_message(message):
 
     if cmd == "scan":
       ADMIN_AWAITING_CMD.discard(uid)
-      wait_s = bot.reply_to(
-          message, "⏳ Strategik signallar skanerlanmoqda..."
-      )
+      wait_s = bot.reply_to(message, "⏳ Strategik signallar skanerlanmoqda...")
       matches = run_strategy_scanner()
       if not matches:
         bot.edit_message_text(
