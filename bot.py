@@ -34,8 +34,8 @@ def _get_env_or_default(var_name, default_val=""):
 # ==========================================
 # 2. SOZLAMALAR, KANAL VA LIMITLAR
 # ==========================================
-TELEGRAM_TOKEN = _get_env_or_default
-GEMINI_API_KEY = _get_env_or_default
+TELEGRAM_TOKEN = _get_env_or_default("TELEGRAM_TOKEN")
+GEMINI_API_KEY = _get_env_or_default("GEMINI_API_KEY")
 
 if not TELEGRAM_TOKEN:
   raise ValueError("TELEGRAM_TOKEN muhit o'zgaruvchisi (Environment Variable) kiritilmagan!")
