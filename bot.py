@@ -2548,15 +2548,15 @@ def handle_message(message):
         )
     )
       try:
-           headers = {"User-Agent": "Mozilla/5.0"}
-      img_data = requests.get(chart_url, headers=headers, timeout=10).content
-      bot.send_photo(
-          message.chat.id,
-          img_data,
-          caption=f"📉 {ticker_symbol} — Kunlik (D1) grafik",
-      )
-    except Exception:
-      pass
+            headers = {"User-Agent": "Mozilla/5.0"}
+            img_data = requests.get(chart_url, headers=headers, timeout=10).content
+            bot.send_photo(
+                message.chat.id,
+                img_data,
+                caption=f"📈 {ticker_symbol} — Kunlik (D1) grafik",
+            )
+        except Exception:
+            pass
 
     chunks = split_html_message(report, limit=3900)
     for idx, chunk in enumerate(chunks):
