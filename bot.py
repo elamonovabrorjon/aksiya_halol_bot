@@ -1953,10 +1953,10 @@ def get_stock_analysis(ticker_symbol, quota_info=None):
       divs_series = ticker.dividends
   except Exception:
       divs_series = None
-  inc = None
+inc = None
 bs = None
 cf= None
-  return build_full_no_na_report( 
+return build_full_no_na_report( 
         ticker_symbol=ticker_symbol,
         info=info or {},
         hist=hist,
