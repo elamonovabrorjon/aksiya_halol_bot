@@ -2540,7 +2540,7 @@ def handle_message(message):
       )
       return
 
-    markup = types.InlineKeyboardMarkup()
+      markup = types.InlineKeyboardMarkup()
     markup.add(
         types.InlineKeyboardButton(
             text="📰 So'nggi yangiliklar (O'zbekcha)",
