@@ -1949,12 +1949,12 @@ def get_stock_analysis(ticker_symbol, quota_info=None):
 
   _record_monthly_activity(kind="analysis", ticker=ticker_symbol) 
   divs_series = None
-    try:
+  try:
       divs_series = ticker.dividends
-    except Exception:
+  except Exception:
       divs_series = None
 
-    return build_full_no_na_report(
+  return build_full_no_na_report(
         ticker_symbol=ticker_symbol,
         info=info or {},
         hist=hist,
