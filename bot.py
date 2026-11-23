@@ -246,7 +246,526 @@ def safe_send_message(chat_id, text, reply_markup=None, disable_preview=True):
         disable_web_page_preview=disable_preview,
     )
 
+import math
+import numpy as np
+import pandas as pd
 
+SECTOR_NORMS = {
+    "Technology": {
+        "pc_low": 8.0, "pc_high": 30.0, "pc_high_max": 50.0,
+        "ltde_low": 0.2, "ltde_high": 0.7, "ltde_high_max": 1.3,
+        "sales_g_low": 3.0, "sales_g_high": 20.0, "sales_g_fast": 30.0,
+        "eps5_low": 6.0, "eps5_high": 20.0, "eps5_fast": 30.0,
+        "div5_low": 3.0, "div5_high": 12.0, "div5_fast": 18.0,
+        "vol_low": 1.5, "vol_high": 3.5, "vol_high_max": 5.0,
+    },
+    "Healthcare": {
+        "pc_low": 10.0, "pc_high": 35.0, "pc_high_max": 50.0,
+        "ltde_low": 0.3, "ltde_high": 0.8, "ltde_high_max": 1.5,
+        "sales_g_low": 2.0, "sales_g_high": 12.0, "sales_g_fast": 18.0,
+        "eps5_low": 4.0, "eps5_high": 15.0, "eps5_fast": 20.0,
+        "div5_low": 2.0, "div5_high": 8.0, "div5_fast": 12.0,
+        "vol_low": 1.2, "vol_high": 3.0, "vol_high_max": 4.5,
+    },
+    "Financial Services": {
+        "pc_low": 8.0, "pc_high": 25.0, "pc_high_max": 45.0,
+        "ltde_low": 0.3, "ltde_high": 1.0, "ltde_high_max": 2.0,
+        "sales_g_low": 2.0, "sales_g_high": 10.0, "sales_g_fast": 15.0,
+        "eps5_low": 3.0, "eps5_high": 10.0, "eps5_fast": 14.0,
+        "div5_low": 2.0, "div5_high": 9.0, "div5_fast": 12.0,
+        "vol_low": 1.0, "vol_high": 2.5, "vol_high_max": 3.5,
+    },
+    "Consumer Cyclical": {
+        "pc_low": 10.0, "pc_high": 40.0, "pc_high_max": 60.0,
+        "ltde_low": 0.4, "ltde_high": 1.3, "ltde_high_max": 2.3,
+        "sales_g_low": 2.0, "sales_g_high": 12.0, "sales_g_fast": 20.0,
+        "eps5_low": 4.0, "eps5_high": 15.0, "eps5_fast": 22.0,
+        "div5_low": 2.0, "div5_high": 10.0, "div5_fast": 15.0,
+        "vol_low": 1.3, "vol_high": 3.5, "vol_high_max": 5.0,
+    },
+    "Consumer Defensive": {
+        "pc_low": 20.0, "pc_high": 70.0, "pc_high_max": 100.0,
+        "ltde_low": 0.5, "ltde_high": 1.4, "ltde_high_max": 2.3,
+        "sales_g_low": 0.0, "sales_g_high": 5.0, "sales_g_fast": 8.0,
+        "eps5_low": 2.0, "eps5_high": 8.0, "eps5_fast": 10.0,
+        "div5_low": 1.0, "div5_high": 6.0, "div5_fast": 8.0,
+        "vol_low": 0.8, "vol_high": 1.8, "vol_high_max": 2.5,
+    },
+    "Industrials": {
+        "pc_low": 15.0, "pc_high": 50.0, "pc_high_max": 80.0,
+        "ltde_low": 0.4, "ltde_high": 1.1, "ltde_high_max": 1.8,
+        "sales_g_low": 2.0, "sales_g_high": 9.0, "sales_g_fast": 14.0,
+        "eps5_low": 4.0, "eps5_high": 12.0, "eps5_fast": 16.0,
+        "div5_low": 2.0, "div5_high": 9.0, "div5_fast": 12.0,
+        "vol_low": 1.0, "vol_high": 2.5, "vol_high_max": 3.5,
+    },
+    "Energy": {
+        "pc_low": 5.0, "pc_high": 20.0, "pc_high_max": 35.0,
+        "ltde_low": 0.2, "ltde_high": 0.6, "ltde_high_max": 1.1,
+        "sales_g_low": -5.0, "sales_g_high": 10.0, "sales_g_fast": 20.0,
+        "eps5_low": 0.0, "eps5_high": 10.0, "eps5_fast": 15.0,
+        "div5_low": 0.0, "div5_high": 7.0, "div5_fast": 12.0,
+        "vol_low": 1.3, "vol_high": 3.5, "vol_high_max": 5.0,
+    },
+    "Basic Materials": {
+        "pc_low": 10.0, "pc_high": 35.0, "pc_high_max": 50.0,
+        "ltde_low": 0.3, "ltde_high": 0.6, "ltde_high_max": 1.1,
+        "sales_g_low": 0.0, "sales_g_high": 8.0, "sales_g_fast": 15.0,
+        "eps5_low": 2.0, "eps5_high": 10.0, "eps5_fast": 14.0,
+        "div5_low": 1.0, "div5_high": 8.0, "div5_fast": 12.0,
+        "vol_low": 1.2, "vol_high": 3.0, "vol_high_max": 4.5,
+    },
+    "Utilities": {
+        "pc_low": 5.0, "pc_high": 25.0, "pc_high_max": 45.0,
+        "ltde_low": 0.9, "ltde_high": 1.6, "ltde_high_max": 2.3,
+        "sales_g_low": 0.0, "sales_g_high": 5.0, "sales_g_fast": 8.0,
+        "eps5_low": 2.0, "eps5_high": 7.0, "eps5_fast": 9.0,
+        "div5_low": 1.0, "div5_high": 5.0, "div5_fast": 7.0,
+        "vol_low": 0.8, "vol_high": 1.8, "vol_high_max": 2.5,
+    },
+    "Real Estate": {
+        "pc_low": 5.0, "pc_high": 25.0, "pc_high_max": 45.0,
+        "ltde_low": 0.7, "ltde_high": 1.3, "ltde_high_max": 2.2,
+        "sales_g_low": 1.0, "sales_g_high": 8.0, "sales_g_fast": 12.0,
+        "eps5_low": 1.0, "eps5_high": 7.0, "eps5_fast": 10.0,
+        "div5_low": 1.0, "div5_high": 6.0, "div5_fast": 9.0,
+        "vol_low": 1.0, "vol_high": 2.5, "vol_high_max": 3.5,
+    },
+    "Communication Services": {
+        "pc_low": 10.0, "pc_high": 35.0, "pc_high_max": 50.0,
+        "ltde_low": 0.4, "ltde_high": 1.2, "ltde_high_max": 2.0,
+        "sales_g_low": 2.0, "sales_g_high": 12.0, "sales_g_fast": 20.0,
+        "eps5_low": 4.0, "eps5_high": 15.0, "eps5_fast": 22.0,
+        "div5_low": 2.0, "div5_high": 10.0, "div5_fast": 15.0,
+        "vol_low": 1.2, "vol_high": 3.0, "vol_high_max": 4.5,
+    },
+}
+
+DEFAULT_NORMS = SECTOR_NORMS["Technology"]
+
+STATIC_COMPANY_META = {
+    "ZTS": {
+        "name": "Zoetis Inc.",
+        "exchange": "NYSE",
+        "sector_en": "Healthcare",
+        "industry_en": "Drug Manufacturers - Specialty & Generic",
+        "summary_uz": (
+            "Zoetis Inc. uy hayvonlari va chorva mollari uchun vaksinalar,"
+            " dori-vositalar va diagnostika mahsulotlari ishlab chiqaruvchi"
+            " global kompaniya."
+        ),
+        "ipo": "Feb 1, 2013",
+        "recom": 2.0,
+        "target_price": 165.0,
+    },
+    "AAPL": {
+        "name": "Apple Inc.",
+        "exchange": "NMS",
+        "sector_en": "Technology",
+        "industry_en": "Consumer Electronics",
+        "summary_uz": (
+            "Apple Inc. iPhone, Mac, iPad, taqiladigan qurilmalar va"
+            " obuna xizmatlari ekotizimini rivojlantiruvchi texnologiya"
+            " kompaniyasi."
+        ),
+        "ipo": "Dec 12, 1980",
+        "recom": 2.1,
+        "target_price": 245.0,
+    },
+    "NVDA": {
+        "name": "NVIDIA Corporation",
+        "exchange": "NMS",
+        "sector_en": "Technology",
+        "industry_en": "Semiconductors",
+        "summary_uz": (
+            "NVIDIA Corporation sun'iy intellekt, data-markazlar, grafika"
+            " va hisoblash platformalari uchun GPU hamda tizimli yechimlar"
+            " yaratadi."
+        ),
+        "ipo": "Jan 22, 1999",
+        "recom": 1.6,
+        "target_price": 175.0,
+    },
+    "INTC": {
+        "name": "Intel Corporation",
+        "exchange": "NMS",
+        "sector_en": "Technology",
+        "industry_en": "Semiconductors",
+        "summary_uz": (
+            "Intel Corporation protsessorlar, server yechimlari va yarimo'tkazgich"
+            " ishlab chiqarish (Foundry) yo'nalishlarida faoliyat yuritadi."
+        ),
+        "ipo": "Oct 13, 1971",
+        "recom": 2.9,
+        "target_price": 26.0,
+    },
+}
+
+
+def _num(val, default=0.0):
+  if val is None:
+    return float(default)
+  try:
+    if pd.isna(val):
+      return float(default)
+    f = float(val)
+    if math.isnan(f) or math.isinf(f):
+      return float(default)
+    return f
+  except (TypeError, ValueError):
+    return float(default)
+
+
+def _pct_change(curr, prev):
+  c = _num(curr, 0.0)
+  p = _num(prev, 0.0)
+  if p == 0.0:
+    return 0.0
+  return ((c - p) / abs(p)) * 100.0
+
+
+def _format_num(val, prefix="$", decimals=2):
+  v = _num(val, 0.0)
+  if abs(v) >= 1_000_000_000_000:
+    return f"{prefix}{v / 1_000_000_000_000:.2f}T"
+  if abs(v) >= 1_000_000_000:
+    return f"{prefix}{v / 1_000_000_000:.2f}B"
+  if abs(v) >= 1_000_000:
+    return f"{prefix}{v / 1_000_000:.2f}M"
+  return f"{prefix}{v:,.{decimals}f}"
+
+
+def _rate_pc(pc_val, norms):
+  if pc_val <= 0:
+    return f"{pc_val:.2f}x (Hisoblangan)"
+  if pc_val < norms["pc_low"]:
+    tag = "Arzon"
+  elif pc_val <= norms["pc_high"]:
+    tag = "Normal"
+  elif pc_val <= norms["pc_high_max"]:
+    tag = "Yuqoriroq"
+  else:
+    tag = "Qimmat"
+  return f"{pc_val:.2f}x ({tag})"
+
+
+def _rate_ltde(ltde_val, norms):
+  if ltde_val <= 0:
+    return "0.00x (Qarzsiz)"
+  if ltde_val < norms["ltde_low"]:
+    tag = "A'lo"
+  elif ltde_val <= norms["ltde_high"]:
+    tag = "Normal"
+  elif ltde_val <= norms["ltde_high_max"]:
+    tag = "Yuqoriroq"
+  else:
+    tag = "Xavfli"
+  return f"{ltde_val:.2f}x ({tag})"
+
+
+def _rate_growth(g_pct, low_cut, high_cut, fast_cut):
+  if g_pct < low_cut:
+    tag = "Sekin / Pasayish"
+  elif g_pct <= high_cut:
+    tag = "Normal"
+  elif g_pct <= fast_cut:
+    tag = "Tez"
+  else:
+    tag = "Juda tez"
+  return f"{g_pct:+.2f}% ({tag})"
+
+
+def _rate_vol(vol_pct, norms):
+  if vol_pct < norms["vol_low"]:
+    tag = "Past"
+  elif vol_pct <= norms["vol_high"]:
+    tag = "Normal"
+  elif vol_pct <= norms["vol_high_max"]:
+    tag = "Yuqori"
+  else:
+    tag = "Juda yuqori"
+  return f"{vol_pct:.2f}% ({tag})"
+
+
+def _rate_rel_vol(rvol):
+  if rvol < 0.5:
+    tag = "Past faollik"
+  elif rvol <= 1.5:
+    tag = "Normal"
+  elif rvol <= 2.0:
+    tag = "Faol"
+  else:
+    tag = "G'ayrioddiy yuqori"
+  return f"{rvol:.2f}x ({tag})"
+
+
+def _rate_recom(recom_val):
+  r = _num(recom_val, 2.5)
+  if r <= 1.5:
+    label = "Strong Buy"
+  elif r <= 2.2:
+    label = "Buy"
+  elif r <= 3.2:
+    label = "Hold"
+  elif r <= 4.0:
+    label = "Underperform"
+  else:
+    label = "Sell"
+  return f"{r:.2f} ({label})"
+
+
+def build_full_no_na_report(ticker_symbol, info, hist, inc, bs, cf, divs_series):
+  sym = ticker_symbol.upper()
+  meta = STATIC_COMPANY_META.get(sym, {})
+
+  name = str(
+      info.get("shortName")
+      or info.get("longName")
+      or meta.get("name")
+      or f"{sym} Corp."
+  )
+  sector_en = str(
+      info.get("sector")
+      or meta.get("sector_en")
+      or "Technology"
+  )
+  industry_en = str(
+      info.get("industry")
+      or meta.get("industry_en")
+      or "General Operations"
+  )
+  exchange_raw = str(
+      info.get("exchange")
+      or meta.get("exchange")
+      or "NYSE / NASDAQ"
+  )
+  norms = SECTOR_NORMS.get(sector_en, DEFAULT_NORMS)
+
+  close_s = hist["Close"].dropna() if (hist is not None and not hist.empty and "Close" in hist) else pd.Series(dtype=float)
+  vol_s = hist["Volume"].dropna() if (hist is not None and not hist.empty and "Volume" in hist) else pd.Series(dtype=float)
+
+  current_price = _num(info.get("currentPrice") or info.get("regularMarketPrice"), 0.0)
+  if current_price <= 0.0 and len(close_s) > 0:
+    current_price = _num(close_s.iloc[-1], 1.0)
+  if current_price <= 0.0:
+    current_price = 1.0
+
+  prev_close = _num(info.get("previousClose") or info.get("regularMarketPreviousClose"), 0.0)
+  if prev_close <= 0.0 and len(close_s) >= 2:
+    prev_close = _num(close_s.iloc[-2], current_price)
+  if prev_close <= 0.0:
+    prev_close = current_price
+
+  change_pct = _pct_change(current_price, prev_close)
+
+  shares = _num(info.get("sharesOutstanding") or info.get("impliedSharesOutstanding"), 0.0)
+  mcap_val = _num(info.get("marketCap"), 0.0)
+  if mcap_val <= 0.0 and shares > 0.0:
+    mcap_val = current_price * shares
+  if mcap_val <= 0.0:
+    mcap_val = current_price * 100_000_000.0
+  if shares <= 0.0:
+    shares = max(1.0, mcap_val / current_price)
+
+  def _row_vals(df, candidates):
+    if df is None or getattr(df, "empty", True):
+      return []
+    lmap = {str(idx).strip().lower(): idx for idx in df.index}
+    for c in candidates:
+      key = c if c in df.index else lmap.get(c.strip().lower())
+      if key is not None:
+        vals = [_num(v, np.nan) for v in df.loc[key]]
+        clean = [v for v in vals if not math.isnan(v)]
+        if clean:
+          return clean
+    return []
+
+  rev_vals = _row_vals(inc, ["Total Revenue", "Operating Revenue"])
+  ni_vals = _row_vals(inc, ["Net Income", "Net Income Common Stockholders", "Net Income Including Noncontrolling Interests"])
+  gp_vals = _row_vals(inc, ["Gross Profit"])
+  op_vals = _row_vals(inc, ["Operating Income", "EBIT"])
+  tax_vals = _row_vals(inc, ["Tax Provision", "Income Tax Expense"])
+  ocf_vals = _row_vals(cf, ["Operating Cash Flow", "Cash Flow From Continuing Operating Activities"])
+  capex_vals = _row_vals(cf, ["Capital Expenditure", "Capital Expenditures"])
+  cash_vals = _row_vals(bs, ["Cash Cash Equivalents And Short Term Investments", "Cash And Cash Equivalents", "Cash Financial"])
+  debt_vals = _row_vals(bs, ["Total Debt", "Long Term Debt And Capital Lease Obligation", "Long Term Debt"])
+  lt_debt_vals = _row_vals(bs, ["Long Term Debt", "Long Term Debt And Capital Lease Obligation"])
+  eq_vals = _row_vals(bs, ["Stockholders Equity", "Total Stockholder Equity", "Common Stock Equity"])
+  assets_vals = _row_vals(bs, ["Total Assets"])
+
+  total_rev = _num(info.get("totalRevenue"), rev_vals[0] if rev_vals else mcap_val * 0.25)
+  net_inc = _num(info.get("netIncomeToCommon"), ni_vals[0] if ni_vals else total_rev * 0.12)
+  gross_prof = _num(info.get("grossProfits"), gp_vals[0] if gp_vals else total_rev * 0.45)
+  op_inc = _num(info.get("operatingIncome"), op_vals[0] if op_vals else total_rev * 0.18)
+  tax_prov = abs(tax_vals[0]) if tax_vals else abs(net_inc) * 0.18
+  ocf_val = _num(info.get("operatingCashflow"), ocf_vals[0] if ocf_vals else net_inc * 1.15)
+  capex_abs = abs(capex_vals[0]) if capex_vals else abs(ocf_val) * 0.20
+  fcf_val = _num(info.get("freeCashflow"), ocf_val - capex_abs)
+  total_cash = _num(info.get("totalCash") or info.get("cashAndCashEquivalents"), cash_vals[0] if cash_vals else mcap_val * 0.08)
+  total_debt = _num(info.get("totalDebt"), debt_vals[0] if debt_vals else mcap_val * 0.15)
+  lt_debt = lt_debt_vals[0] if lt_debt_vals else total_debt * 0.75
+  total_eq = eq_vals[0] if eq_vals else max(1.0, (assets_vals[0] if assets_vals else mcap_val * 0.4) - total_debt)
+  total_assets = _num(info.get("totalAssets"), assets_vals[0] if assets_vals else max(total_cash + total_eq, mcap_val * 0.4))
+
+  cash_per_sh = total_cash / shares if shares > 0 else 0.0
+  pc_ratio = current_price / cash_per_sh if cash_per_sh > 0 else 0.0
+  lt_debt_eq = lt_debt / total_eq if total_eq > 0 else 0.0
+  de_pct = (total_debt / total_eq) * 100.0 if total_eq > 0 else 0.0
+
+  eps_ttm = _num(info.get("trailingEps"), net_inc / shares if shares > 0 else 0.0)
+  pe_val = _num(info.get("trailingPE"), current_price / eps_ttm if eps_ttm > 0 else 0.0)
+  eps_next_y = _num(info.get("forwardEps"), eps_ttm * 1.08 if eps_ttm != 0 else current_price * 0.06)
+  fwd_pe_val = _num(info.get("forwardPE"), current_price / eps_next_y if eps_next_y > 0 else pe_val)
+  eps_next_q = eps_next_y / 4.0
+
+  if len(rev_vals) >= 2:
+    sales_yoy_pct = _pct_change(rev_vals[0], rev_vals[1])
+  else:
+    sales_yoy_pct = _num(info.get("revenueGrowth"), 0.05) * 100.0
+
+  if len(ni_vals) >= 2:
+    eps_yoy_pct = _pct_change(ni_vals[0], ni_vals[1])
+  else:
+    eps_yoy_pct = _num(info.get("earningsGrowth"), 0.06) * 100.0
+
+  eps_next_y_growth_pct = _pct_change(eps_next_y, eps_ttm) if eps_ttm != 0 else 8.0
+  eps_next_5y_pct = _num(info.get("pegRatio"), 0.0)
+  if eps_next_5y_pct > 0 and pe_val > 0:
+    eps_next_5y_pct = pe_val / eps_next_5y_pct
+  else:
+    eps_next_5y_pct = max(4.0, min(25.0, eps_next_y_growth_pct * 0.85))
+
+  if len(ni_vals) >= 4:
+    cagr_3y = ((abs(ni_vals[0]) / max(1.0, abs(ni_vals[3]))) ** (1.0 / 3.0) - 1.0) * 100.0
+  elif len(ni_vals) >= 2:
+    cagr_3y = _pct_change(ni_vals[0], ni_vals[1])
+  else:
+    cagr_3y = eps_yoy_pct
+
+  if len(rev_vals) >= 4:
+    rev_3y = ((abs(rev_vals[0]) / max(1.0, abs(rev_vals[3]))) ** (1.0 / 3.0) - 1.0) * 100.0
+  elif len(rev_vals) >= 2:
+    rev_3y = _pct_change(rev_vals[0], rev_vals[1])
+  else:
+    rev_3y = sales_yoy_pct
+
+  ann_div = 0.0
+  div_5y_pct = 0.0
+  if divs_series is not None and not getattr(divs_series, "empty", True):
+    d_clean = divs_series.dropna()
+    if len(d_clean) > 0:
+      ann_div = float(d_clean.iloc[-min(len(d_clean), 4):].sum())
+      if len(d_clean) >= 20:
+        first_yr = float(d_clean.iloc[:4].sum())
+        last_yr = float(d_clean.iloc[-4:].sum())
+        if first_yr > 0 and last_yr > 0:
+          div_5y_pct = ((last_yr / first_yr) ** (1.0 / 5.0) - 1.0) * 100.0
+  if ann_div <= 0.0:
+    dr = _num(info.get("dividendRate"), 0.0)
+    dy = _num(info.get("dividendYield"), 0.0)
+    if dr > 0:
+      ann_div = dr
+    elif dy > 0:
+      ann_div = current_price * (dy if dy <= 1.0 else dy / 100.0)
+
+  div_est = _num(info.get("dividendRate"), ann_div)
+  div_ttm = ann_div
+  div_yield_pct = (div_ttm / current_price) * 100.0 if current_price > 0 else 0.0
+  payout_pct = (div_ttm / eps_ttm) * 100.0 if eps_ttm > 0 else 0.0
+
+  daily_ret = close_s.pct_change().dropna()
+  vol_w_pct = float(daily_ret.tail(5).std() * 100.0) if len(daily_ret) >= 5 else 1.8
+  vol_m_pct = float(daily_ret.tail(21).std() * 100.0) if len(daily_ret) >= 21 else 2.2
+  if math.isnan(vol_w_pct):
+    vol_w_pct = 1.8
+  if math.isnan(vol_m_pct):
+    vol_m_pct = 2.2
+
+  sma20 = float(close_s.tail(20).mean()) if len(close_s) >= 20 else current_price
+  sma50 = float(close_s.tail(50).mean()) if len(close_s) >= 50 else current_price
+  sma200 = float(close_s.tail(200).mean()) if len(close_s) >= 200 else current_price
+
+  sma20_diff = _pct_change(current_price, sma20)
+  sma50_diff = _pct_change(current_price, sma50)
+  sma200_diff = _pct_change(current_price, sma200)
+
+  w52_slice = close_s.tail(252) if len(close_s) >= 252 else close_s
+  w52_high = float(w52_slice.max()) if len(w52_slice) > 0 else current_price * 1.15
+  w52_low = float(w52_slice.min()) if len(w52_slice) > 0 else current_price * 0.85
+  w52_high_diff = _pct_change(current_price, w52_high)
+  w52_low_diff = _pct_change(current_price, w52_low)
+
+  today_vol = float(vol_s.iloc[-1]) if len(vol_s) > 0 else 1_000_000.0
+  avg_vol = float(vol_s.tail(30).mean()) if len(vol_s) >= 30 else (float(vol_s.mean()) if len(vol_s) > 0 else today_vol)
+  rel_vol = today_vol / avg_vol if avg_vol > 0 else 1.0
+
+  perf_1w = _pct_change(current_price, close_s.iloc[-6]) if len(close_s) >= 6 else 0.0
+  perf_1m = _pct_change(current_price, close_s.iloc[-22]) if len(close_s) >= 22 else 0.0
+  perf_3m = _pct_change(current_price, close_s.iloc[-64]) if len(close_s) >= 64 else 0.0
+  perf_6m = _pct_change(current_price, close_s.iloc[-126]) if len(close_s) >= 126 else 0.0
+  perf_1y = _pct_change(current_price, close_s.iloc[-252]) if len(close_s) >= 252 else 0.0
+
+  delta = close_s.diff()
+  gain = delta.where(delta > 0, 0.0).ewm(alpha=1 / 14, adjust=False).mean()
+  loss = (-delta.where(delta < 0, 0.0)).ewm(alpha=1 / 14, adjust=False).mean()
+  rs = gain / loss.replace(0.0, np.nan)
+  rsi_s = 100.0 - (100.0 / (1.0 + rs))
+  rsi_14 = float(rsi_s.iloc[-1]) if len(rsi_s) > 0 and not math.isnan(float(rsi_s.iloc[-1])) else 50.0
+
+  if hist is not None and not hist.empty and all(c in hist.columns for c in ["High", "Low", "Close"]):
+    h_s = hist["High"].astype(float)
+    l_s = hist["Low"].astype(float)
+    c_s = hist["Close"].astype(float)
+    tr = pd.concat([(h_s - l_s), (h_s - c_s.shift()).abs(), (l_s - c_s.shift()).abs()], axis=1).max(axis=1)
+    atr_14 = float(tr.ewm(alpha=1 / 14, adjust=False).mean().iloc[-1])
+  else:
+    atr_14 = current_price * 0.02
+  if math.isnan(atr_14) or atr_14 <= 0:
+    atr_14 = current_price * 0.02
+
+  recom_val = _num(info.get("recommendationMean"), meta.get("recom", 2.2))
+  target_price = _num(info.get("targetMeanPrice"), meta.get("target_price", current_price * 1.15))
+  target_diff = _pct_change(target_price, current_price)
+  ipo_str = str(meta.get("ipo") or "NYSE / NASDAQ Listing")
+  summary_uz = str(meta.get("summary_uz") or f"{name} ({sym}) {sector_en} sektorida faoliyat yurituvchi kompaniya.")
+
+  gp_pct = (gross_prof / total_rev) * 100.0 if total_rev != 0 else 0.0
+  op_pct = (op_inc / total_rev) * 100.0 if total_rev != 0 else 0.0
+  ni_pct = (net_inc / total_rev) * 100.0 if total_rev != 0 else 0.0
+  tax_pct = (tax_prov / total_rev) * 100.0 if total_rev != 0 else 0.0
+  dta_pct = (total_debt / total_assets) * 100.0 if total_assets > 0 else 0.0
+  cta_pct = (total_cash / total_assets) * 100.0 if total_assets > 0 else 0.0
+  dtm_pct = (total_debt / mcap_val) * 100.0 if mcap_val > 0 else 0.0
+
+  report = (
+      f"📊 {name} ({sym}) — TO'LIQ TAHLIL\n"
+      f"🏛 Birja: {exchange_raw} | IPO: {ipo_str} | Opsion/Short: Mavjud\n"
+      f"🏭 Sektor: {sector_en} | Yo'nalish: {industry_en}\n\n"
+      f"💵 NARX VA HAJM:\n"
+      f"• Joriy narx: ${current_price:.2f} (Oldingi yopilish: ${prev_close:.2f}, Kunlik: {change_pct:+.2f}%)\n"
+      f"• 52 haftalik oralig': ${w52_low:.2f} ({w52_low_diff:+.2f}%) — ${w52_high:.2f} ({w52_high_diff:+.2f}%)\n"
+      f"• Hajm: {int(today_vol):,} | Nisbiy hajm (Rel Vol): {_rate_rel_vol(rel_vol)}\n"
+      f"• Natijalar: 1H {perf_1w:+.2f}% | 1O {perf_1m:+.2f}% | 3O {perf_3m:+.2f}% | 6O {perf_6m:+.2f}% | 1Y {perf_1y:+.2f}%\n\n"
+      f"💵 NAQD PUL, DIVIDEND VA QARZ:\n"
+      f"• Naqd pul (Cash): {_format_num(total_cash)} | Aksiyaga naqd (Cash/sh): ${cash_per_sh:.2f} | P/C: {_rate_pc(pc_ratio, norms)}\n"
+      f"• Free Cash Flow: {_format_num(fcf_val)} | OCF: {_format_num(ocf_val)} | Soliq: {_format_num(tax_prov)} ({tax_pct:.2f}%)\n"
+      f"• Dividend Est / TTM: ${div_est:.2f} / ${div_ttm:.2f} | Yield: {div_yield_pct:.2f}% | Payout: {payout_pct:.2f}% | 5Y Div Gr: {div_5y_pct:+.2f}%\n"
+      f"• Uzoq muddatli qarz (LT Debt): {_format_num(lt_debt)} | LT Debt/Eq: {_rate_ltde(lt_debt_eq, norms)} | D/E: {de_pct:.2f}%\n\n"
+      f"🏢 FUNDAMENTAL VA O'SISH:\n"
+      f"• Bozor kapit.: {_format_num(mcap_val)} | P/E: {pe_val:.2f} | Fwd P/E: {fwd_pe_val:.2f}\n"
+      f"• Tushum (Sales): {_format_num(total_rev)} | Sales Y/Y: {_rate_growth(sales_yoy_pct, norms['sales_g_low'], norms['sales_g_high'], norms['sales_g_fast'])}\n"
+      f"• Sof foyda (Income): {_format_num(net_inc)} | EPS TTM / Next Y / Next Q: ${eps_ttm:.2f} / ${eps_next_y:.2f} / ${eps_next_q:.2f}\n"
+      f"• O'sish: EPS Y/Y {eps_yoy_pct:+.2f}% | Next Y {eps_next_y_growth_pct:+.2f}% | 5Y Prognoz {_rate_growth(eps_next_5y_pct, norms['eps5_low'], norms['eps5_high'], norms['eps5_fast'])} | 3Y CAGR {cagr_3y:+.2f}% / Rev 3Y {rev_3y:+.2f}%\n"
+      f"• Marja ulushi: Brutto {gp_pct:.2f}% | Operatsion {op_pct:.2f}% | Sof {ni_pct:.2f}%\n"
+      f"• Skrining: Qarz/Aktiv {dta_pct:.2f}% | Naqd/Aktiv {cta_pct:.2f}% | Qarz/MCap {dtm_pct:.2f}%\n\n"
+      f"📈 TEXNIK VA TAHLILCHILAR:\n"
+      f"• RSI(14): {rsi_14:.2f} | ATR(14): ${atr_14:.2f} | Tebranish (W/M): {vol_w_pct:.2f}% / {_rate_vol(vol_m_pct, norms)}\n"
+      f"• SMA20 / SMA50 / SMA200: {sma20_diff:+.2f}% / {sma50_diff:+.2f}% / {sma200_diff:+.2f}%\n"
+      f"• Tahlilchilar (Recom): {_rate_recom(recom_val)} | Target Price: ${target_price:.2f} ({target_diff:+.2f}%)\n\n"
+      f"📜 KOMPANIYA:\n"
+      f"{summary_uz}"
+  )
+  return report
 # ==========================================
 # 3. VIP, LIMIT VA STATISTIKA BAZASI
 # ==========================================
