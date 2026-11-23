@@ -2541,7 +2541,7 @@ def handle_message(message):
       return
 
       markup = types.InlineKeyboardMarkup()
-    markup.add(
+      markup.add(
         types.InlineKeyboardButton(
             text="📰 So'nggi yangiliklar (O'zbekcha)",
             callback_data=f"news_{ticker_symbol}",
