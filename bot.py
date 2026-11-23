@@ -2548,7 +2548,7 @@ def handle_message(message):
         )
     )
       try:
-    headers = {"User-Agent": "Mozilla/5.0"}
+           headers = {"User-Agent": "Mozilla/5.0"}
       img_data = requests.get(chart_url, headers=headers, timeout=10).content
       bot.send_photo(
           message.chat.id,
