@@ -66,35 +66,33 @@ GEMINI_API_KEY = _env("GEMINI_API_KEY")
 if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
   raise ValueError("TELEGRAM_TOKEN va GEMINI_API_KEY muhitda bo'lishi shart!")
 
-GEMINI_MODELS = ["gemini-3.5-flash-lite", "gemini-3-flash-preview"]
+DEFAULT_GEMINI_MODELS = [
+    "gemini-3.5-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+]
+ACTIVE_GEMINI_MODELS = list(DEFAULT_GEMINI_MODELS)
 
 ADMIN_ID = 745170275
 ADMIN_IDS = {ADMIN_ID}
 ADMIN_LINK = "EAA_7879"
 
-SIGNAL_PE_MIN, SIGNAL_PE_MAX = 10.0, 25.0
-SIGNAL_RSI_MIN, SIGNAL_RSI_MAX = 20.0, 30.0
-SCANNER_CACHE_TTL = 600  # 10 daqiqa
+# Algoritmik signal filtrlari (Penny stocklarsiz + RSI 20 -> 30 burilish)
+MIN_STOCK_PRICE = 10.0         # $10 dan arzon penny stocklar chiqarib tashlanadi
+MIN_MARKET_CAP = 2_000_000_000 # $2B dan kichik kompaniyalar kirmaydi
+RSI_OVERSOLD_FLOOR = 20.0      # Oxirgi kunlarda tushgan minimal RSI zonasi
+RSI_BREAKOUT_LEVEL = 30.0      # Bugun kesib o'tgan trend boshlanish chizig'i
+
+SCANNER_CACHE_TTL = 600
 REFERRAL_REWARD_COINS = 10.0
 DAILY_FREE_LIMIT = 5
 MONTHLY_FREE_LIMIT = 20
 
 SCAN_WATCHLIST = [
-    "AAPL",
-    "MSFT",
-    "NVDA",
-    "INTC",
-    "AVGO",
-    "MU",
-    "TSM",
-    "MRK",
-    "JNJ",
-    "CF",
-    "AMZN",
-    "GOOGL",
-    "META",
-    "AMD",
-    "UNH",
+    "AAPL", "MSFT", "NVDA", "INTC", "AVGO", "MU", "TSM",
+    "MRK", "JNJ", "CF", "AMZN", "GOOGL", "META", "AMD",
+    "UNH", "CRM", "ADBE", "QCOM", "TXN", "ORCL", "NFLX",
+    "COST", "PEP", "KO", "PG", "ABBV", "TMO", "NKE",
 ]
 
 USAGE_FILE = "/tmp/bot_usage.json"
@@ -106,57 +104,23 @@ INDEX_CACHE_TTL = 86400
 
 NEWS_CACHE = {
     "data": (
-        "📰 <b>Global Bozor Yangiliklari:</b>\n\nHozircha yangiliklar"
-        " yuklanmoqda, birozdan so'ng qayta tekshiring."
+        "📰 <b>Global Bozor Yangiliklari:</b>\n\nYangiliklar tayyorlanmoqda,"
+        " 10–15 soniyadan so'ng qayta bosing."
     ),
     "last_updated": 0,
 }
-NEWS_TTL = 1800  # 30 daqiqa
+NEWS_TTL = 3600
 
 HARAM_KEYWORDS = {
-    "financial services",
-    "banks",
-    "bank",
-    "insurance",
-    "credit services",
-    "capital markets",
-    "mortgage",
-    "asset management",
-    "gambling",
-    "casinos",
-    "resorts & casinos",
-    "tobacco",
-    "beverages - wineries",
-    "beverages - brewers",
-    "alcohol",
-    "aerospace & defense",
+    "financial services", "banks", "bank", "insurance", "credit services",
+    "capital markets", "mortgage", "asset management", "gambling", "casinos",
+    "resorts & casinos", "tobacco", "beverages - wineries",
+    "beverages - brewers", "alcohol", "aerospace & defense",
 }
 HARAM_TICKERS = {
-    "JPM",
-    "BAC",
-    "WFC",
-    "C",
-    "GS",
-    "MS",
-    "V",
-    "MA",
-    "AXP",
-    "BRK-B",
-    "BRK.B",
-    "PM",
-    "MO",
-    "BTI",
-    "BUD",
-    "DEO",
-    "STZ",
-    "MGM",
-    "LVS",
-    "WYNN",
-    "DKNG",
-    "LMT",
-    "RTX",
-    "NOC",
-    "GD",
+    "JPM", "BAC", "WFC", "C", "GS", "MS", "V", "MA", "AXP", "BRK-B",
+    "BRK.B", "PM", "MO", "BTI", "BUD", "DEO", "STZ", "MGM", "LVS",
+    "WYNN", "DKNG", "LMT", "RTX", "NOC", "GD",
 }
 
 EXCHANGE_MAP = {
@@ -196,11 +160,11 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
 )
 logger = logging.getLogger(__name__)
-bot = telebot.TeleBot(TELEGRAM_TOKEN)
+bot = telebot.TeleBot(TELEGRAM_TOKEN, threaded=True, num_threads=4)
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-USER_STATE = {}
 ADMIN_AWAITING_CMD = set()
+STORE_LOCK = threading.Lock()
 
 BTN_AI_ANALYSIS = "🧠 AI Tahlil"
 BTN_ALGO_SIGNALS = "📊 Algoritmik signallar"
@@ -215,6 +179,9 @@ LVL_MID = "🟡 O'rta"
 LVL_HIGH = "🔴 Yuqori (Excel)"
 
 
+# ==========================================
+# 3. KEEP-ALIVE VA MODEL AUTO-DISCOVERY
+# ==========================================
 class _HealthHandler(BaseHTTPRequestHandler):
 
   def do_GET(self):
@@ -236,14 +203,39 @@ def _start_keep_alive():
   HTTPServer(("0.0.0.0", port), _HealthHandler).serve_forever()
 
 
+def refresh_available_models():
+  global ACTIVE_GEMINI_MODELS
+  try:
+    available = []
+    for m in client.models.list():
+      name = (getattr(m, "name", "") or "").replace("models/", "")
+      methods = getattr(m, "supported_generation_methods", None) or []
+      if "gemini" in name and (not methods or "generateContent" in methods):
+        if "embedding" not in name and "aqa" not in name and "imagen" not in name:
+          available.append(name)
+    if available:
+      preferred = [m for m in DEFAULT_GEMINI_MODELS if m in available]
+      others = [
+          m
+          for m in available
+          if ("flash" in m) and m not in preferred and "preview" not in m
+      ]
+      merged = preferred + others
+      if merged:
+        ACTIVE_GEMINI_MODELS = merged[:4]
+        logger.info("Faol Gemini modellar: %s", ACTIVE_GEMINI_MODELS)
+  except Exception as e:
+    logger.warning("Modellarni avtomatik tekshirishda xato: %s", e)
+
+
 def _clean_plain_text(txt):
-  cleaned = re.sub(r"[*_`#]+", "", txt or "")
-  return cleaned.strip()
+  return re.sub(r"[*_`#]+", "", txt or "").strip()
 
 
 def generate_gemini_text(prompt, retries=2):
   last_err = None
-  for model in GEMINI_MODELS:
+  models_to_try = list(ACTIVE_GEMINI_MODELS) or list(DEFAULT_GEMINI_MODELS)
+  for model in models_to_try:
     for i in range(retries):
       try:
         r = client.models.generate_content(model=model, contents=prompt)
@@ -252,14 +244,17 @@ def generate_gemini_text(prompt, retries=2):
       except Exception as e:
         last_err = e
         s = str(e)
+        logger.warning("Model %s xatosi (urinish %d): %s", model, i + 1, s[:160])
         if "404" in s or "NOT_FOUND" in s:
+          if model in ACTIVE_GEMINI_MODELS and len(ACTIVE_GEMINI_MODELS) > 1:
+            ACTIVE_GEMINI_MODELS.remove(model)
           break
         if any(
             k in s for k in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED")
         ):
           time.sleep(1.5 * (i + 1))
           continue
-        raise
+        break
   if last_err:
     raise last_err
   return ""
@@ -267,6 +262,7 @@ def generate_gemini_text(prompt, retries=2):
 
 def fetch_and_cache_news():
   global NEWS_CACHE
+  time.sleep(3)
   while True:
     try:
       prompt = (
@@ -290,86 +286,20 @@ def fetch_and_cache_news():
     time.sleep(NEWS_TTL)
 
 
-def get_main_keyboard():
-  kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-  kb.row(
-      types.KeyboardButton(BTN_AI_ANALYSIS),
-      types.KeyboardButton(BTN_ALGO_SIGNALS),
-  )
-  kb.row(types.KeyboardButton(BTN_AI_HELP), types.KeyboardButton(BTN_BALANCE))
-  kb.row(types.KeyboardButton(BTN_REFERRAL), types.KeyboardButton(BTN_ADMIN))
-  kb.row(types.KeyboardButton(BTN_NEWS))
-  return kb
-
-
-def get_level_keyboard():
-  kb = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-  kb.row(types.KeyboardButton(LVL_BASIC), types.KeyboardButton(LVL_MID))
-  kb.row(types.KeyboardButton(LVL_HIGH))
-  return kb
-
-
-def _split_message(text, limit=3900):
-  if len(text) <= limit:
-    return [text]
-  parts = []
-  current = ""
-  for line in text.splitlines(keepends=True):
-    if len(line) > limit:
-      if current:
-        parts.append(current)
-        current = ""
-      for i in range(0, len(line), limit):
-        parts.append(line[i : i + limit])
-      continue
-    if len(current) + len(line) > limit:
-      parts.append(current)
-      current = line
-    else:
-      current += line
-  if current:
-    parts.append(current)
-  return parts or [text[:limit]]
-
-
-def safe_send(chat_id, text, reply_markup=None):
-  chunks = _split_message(text)
-  for idx, chunk in enumerate(chunks):
-    markup = reply_markup if idx == len(chunks) - 1 else None
-    try:
-      bot.send_message(
-          chat_id,
-          chunk,
-          parse_mode="HTML",
-          reply_markup=markup,
-          disable_web_page_preview=True,
-      )
-    except Exception:
-      plain = html.unescape(re.sub(r"<[^>]+>", "", chunk))
-      bot.send_message(
-          chat_id,
-          plain,
-          reply_markup=markup,
-          disable_web_page_preview=True,
-      )
-
-
-def _today():
-  return datetime.now().strftime("%Y-%m-%d")
-
-
-def _month():
-  return datetime.now().strftime("%Y-%m")
-
-
+# ==========================================
+# 4. DOIMIY SAQLANUVCHI BAZA (USERS + LOGS)
+# ==========================================
 def load_store():
   base = {
       "vip_users": [ADMIN_ID],
       "known_chats": [],
       "users": {},
+      "user_profiles": {},
+      "search_logs": [],
       "balances": {},
       "referrals": {},
       "referred_by": {},
+      "states": {},
   }
   if os.path.exists(USAGE_FILE):
     try:
@@ -383,14 +313,86 @@ def load_store():
 
 
 def save_store(d):
-  try:
-    with open(USAGE_FILE, "w", encoding="utf-8") as f:
-      json.dump(d, f, ensure_ascii=False, indent=2)
-  except Exception as e:
-    logger.warning("Store saqlash xatosi: %s", e)
+  with STORE_LOCK:
+    try:
+      tmp = USAGE_FILE + ".tmp"
+      with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False, indent=2)
+      os.replace(tmp, USAGE_FILE)
+    except Exception as e:
+      logger.warning("Store saqlash xatosi: %s", e)
 
 
 STORE = load_store()
+
+
+def track_user_profile(msg):
+  u = msg.from_user
+  if not u:
+    return
+  uid = str(int(u.id))
+  profiles = STORE.setdefault("user_profiles", {})
+  cur = profiles.get(uid, {})
+  full_name = f"{u.first_name or ''} {u.last_name or ''}".strip() or "Noma'lum"
+  username = f"@{u.username}" if u.username else "yo'q"
+  profiles[uid] = {
+      "name": full_name,
+      "username": username,
+      "last_seen": datetime.now().strftime("%Y-%m-%d %H:%M"),
+      "tickers": cur.get("tickers", []),
+  }
+  save_store(STORE)
+
+
+def log_user_search(msg, ticker, level):
+  u = msg.from_user
+  if not u:
+    return
+  uid = str(int(u.id))
+  full_name = f"{u.first_name or ''} {u.last_name or ''}".strip() or "Noma'lum"
+  username = f"@{u.username}" if u.username else ""
+  now_str = datetime.now().strftime("%m-%d %H:%M")
+
+  profiles = STORE.setdefault("user_profiles", {})
+  p = profiles.setdefault(
+      uid, {"name": full_name, "username": username or "yo'q", "tickers": []}
+  )
+  p["last_seen"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+  t_list = p.setdefault("tickers", [])
+  t_list.append(ticker)
+  if len(t_list) > 20:
+    p["tickers"] = t_list[-20:]
+
+  logs = STORE.setdefault("search_logs", [])
+  logs.append({
+      "uid": uid,
+      "name": full_name,
+      "username": username,
+      "ticker": ticker,
+      "level": level,
+      "time": now_str,
+  })
+  if len(logs) > 200:
+    STORE["search_logs"] = logs[-200:]
+  save_store(STORE)
+
+
+def get_user_state(cid):
+  st = STORE.setdefault("states", {}).get(str(int(cid)))
+  if isinstance(st, dict):
+    return st
+  return {"mode": "analysis", "level": "basic"}
+
+
+def set_user_state(cid, mode, level=None):
+  cur = get_user_state(cid)
+  new_st = {
+      "mode": mode,
+      "level": level if level is not None else cur.get("level", "basic"),
+  }
+  STORE.setdefault("states", {})[str(int(cid))] = new_st
+  save_store(STORE)
+  return new_st
 
 
 def get_coins(uid):
@@ -446,15 +448,18 @@ def set_vip(uid, flag=True):
   save_store(STORE)
 
 
+def _today():
+  return datetime.now().strftime("%Y-%m-%d")
+
+
+def _month():
+  return datetime.now().strftime("%Y-%m")
+
+
 def _usage_rec(uid):
   rec = STORE.setdefault("users", {}).setdefault(
       str(int(uid)),
-      {
-          "day": _today(),
-          "daily": 0,
-          "month": _month(),
-          "monthly": 0,
-      },
+      {"day": _today(), "daily": 0, "month": _month(), "monthly": 0},
   )
   if rec.get("day") != _today():
     rec["day"], rec["daily"] = _today(), 0
@@ -472,52 +477,27 @@ def reset_limit(uid):
 def consume_quota(uid):
   rec = _usage_rec(uid)
   if is_vip(uid):
-    return (
-        True,
-        "",
-        {
-            "is_vip": True,
-            "daily_used": rec["daily"],
-            "monthly_used": rec["monthly"],
-        },
-    )
+    return True, "", {"is_vip": True}
   if rec["daily"] >= DAILY_FREE_LIMIT:
     return (
         False,
-        (
-            f"⛔ <b>Kunlik limit tugadi!</b> ({rec['daily']}/{DAILY_FREE_LIMIT})."
-            f" VIP uchun: @{ADMIN_LINK}"
-        ),
+        f"⛔ <b>Kunlik limit tugadi!</b> ({rec['daily']}/{DAILY_FREE_LIMIT}). VIP uchun: @{ADMIN_LINK}",
         {"is_vip": False},
     )
   if rec["monthly"] >= MONTHLY_FREE_LIMIT:
     return (
         False,
-        (
-            f"⛔ <b>Oylik limit tugadi!</b>"
-            f" ({rec['monthly']}/{MONTHLY_FREE_LIMIT}). VIP uchun:"
-            f" @{ADMIN_LINK}"
-        ),
+        f"⛔ <b>Oylik limit tugadi!</b> ({rec['monthly']}/{MONTHLY_FREE_LIMIT}). VIP uchun: @{ADMIN_LINK}",
         {"is_vip": False},
     )
   rec["daily"] += 1
   rec["monthly"] += 1
   save_store(STORE)
-  return (
-      True,
-      "",
-      {
-          "is_vip": False,
-          "daily_used": rec["daily"],
-          "daily_left": DAILY_FREE_LIMIT - rec["daily"],
-          "monthly_used": rec["monthly"],
-          "monthly_left": MONTHLY_FREE_LIMIT - rec["monthly"],
-      },
-  )
+  return True, "", {"is_vip": False}
 
 
 # ==========================================
-# 3. INDEKSLAR, TARJIMA VA STATIC JSON
+# 5. INDEKSLAR, TARJIMA VA STATIC JSON
 # ==========================================
 def load_indices(force=False):
   global INDEX_CACHE
@@ -535,14 +515,8 @@ def load_indices(force=False):
   headers = {"User-Agent": "Mozilla/5.0"}
   out = {}
   wiki_sources = {
-      "S&P 500": (
-          "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
-          "Symbol",
-      ),
-      "Dow Jones (DJI)": (
-          "https://en.wikipedia.org/wiki/Dow_Jones_Industrial_Average",
-          "Symbol",
-      ),
+      "S&P 500": ("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies", "Symbol"),
+      "Dow Jones (DJI)": ("https://en.wikipedia.org/wiki/Dow_Jones_Industrial_Average", "Symbol"),
       "NASDAQ-100": ("https://en.wikipedia.org/wiki/Nasdaq-100", "Ticker"),
   }
   for name, (url, col) in wiki_sources.items():
@@ -550,11 +524,7 @@ def load_indices(force=False):
       r = requests.get(url, headers=headers, timeout=10)
       found = set()
       for tbl in pd.read_html(StringIO(r.text)):
-        c = (
-            col
-            if col in tbl.columns
-            else ("Symbol" if "Symbol" in tbl.columns else None)
-        )
+        c = col if col in tbl.columns else ("Symbol" if "Symbol" in tbl.columns else None)
         if c:
           found = set(tbl[c].dropna().astype(str).str.upper().str.strip())
           break
@@ -644,7 +614,7 @@ def resolve_company_meta(sym, info):
 
 
 # ==========================================
-# 4. TEXNIK, FUNDAMENTAL, HALOL VA KIRISH NARXI
+# 6. TEXNIK, FUNDAMENTAL, HALOL VA KIRISH NARXI
 # ==========================================
 def calc_rsi(series, period=14):
   delta = series.diff()
@@ -781,10 +751,7 @@ def eval_halal(sym, sec_en, ind_en, rev, int_inc, debt, cash, mcap):
   )
   h_inc = (
       (float(int_inc) / float(rev) * 100)
-      if rev
-      and float(rev) > 0
-      and int_inc is not None
-      and float(int_inc) > 0
+      if rev and float(rev) > 0 and int_inc is not None and float(int_inc) > 0
       else 0.0
   )
 
@@ -825,170 +792,34 @@ def build_excel_report(sym, payload):
   e = payload["entry"]
 
   definitions = [
-      [
-          "Atama / Ko'rsatkich",
-          "O'zbekcha Ma'nosi / Ta'rifi",
-          "Misol / Izoh",
-      ],
-      [
-          "Sektor",
-          "Kompaniya faoliyat yuritadigan keng iqtisodiy soha",
-          (
-              "Masalan: Texnologiya (Apple, NVIDIA) yoki Sog'liqni saqlash"
-              " (Johnson & Johnson)."
-          ),
-      ],
-      [
-          "Industriya",
-          "Sektor ichidagi aniqroq biznes yo'nalishi",
-          (
-              "Masalan: Yarimo'tkazgichlar (chip ishlab chiqarish) yoki"
-              " Farmatsevtika."
-          ),
-      ],
-      [
-          "Market Cap (Bozor Kapitallashuvi)",
-          "Kompaniyaning umumiy bozor qiymati (Narx × Aksiyalar soni)",
-          (
-              "Masalan: $500B+ yirik kompaniya hisoblanadi; hajm barqarorlikni"
-              " ko'rsatadi."
-          ),
-      ],
-      [
-          "Total Revenue (Yillik Tushum)",
-          "Xarajatlar va soliqlar ayrilgungacha bo'lgan umumiy savdo/tushum",
-          (
-              "Masalan: yillik tushum $80B bo'lsa, kompaniya mahsulot/xizmatidan"
-              " shuncha tushum olgan."
-          ),
-      ],
-      [
-          "Net Income (Sof Foyda)",
-          "Barcha xarajatlar, soliq va foizlar to'langach qolgan yakuniy foyda",
-          (
-              "Masalan: tushum $80B va sof foyda $20B bo'lsa, foyda marjasi 25%."
-              " Minus bo'lsa zarar."
-          ),
-      ],
-      [
-          "Operating Cash Flow (OCF)",
-          "Asosiy operatsion faoliyatdan kelib tushgan va sarflangan real naqd"
-          " pul",
-          (
-              "Masalan: OCF $351M bo'lsa, asosiy ish jarayoni $351M real pul"
-              " oqimi yaratgan."
-          ),
-      ],
-      [
-          "Free Cash Flow (FCF)",
-          "OCFdan kapital xarajatlar (Capex) ayrilgach qolgan erkin naqd pul",
-          (
-              "Masalan: FCF ijobiy bo'lsa, kompaniya qarz to'lash, dividend yoki"
-              " investitsiyaga erkin pulga ega."
-          ),
-      ],
-      [
-          "Total Cash (Naqd Pul)",
-          "Kompaniya hisobidagi naqd mablag' va tez naqdlashtiriladigan"
-          " aktivlar",
-          (
-              "Masalan: $735M naqd pul kutilmagan xarajatlarga qarshi moliyaviy"
-              " zaxira."
-          ),
-      ],
-      [
-          "Total Debt (Umumiy Qarz)",
-          "Kompaniyaning qisqa va uzoq muddatli jami qarz majburiyatlari",
-          (
-              "Masalan: $4.30B qarzni naqd pul va FCF bilan solishtirib qarz"
-              " yukini baholash mumkin."
-          ),
-      ],
-      [
-          "P/E Ratio (TTM)",
-          "Aksiya narxining 1 aksiyaga to'g'ri keladigan yillik foydaga nisbati",
-          (
-              "Masalan: P/E = 20 bo'lsa, $1 foyda uchun bozorda $20"
-              " to'lanmoqda; manfiy bo'lsa sof foyda minusda."
-          ),
-      ],
-      [
-          "SMA20 / SMA50 / SMA200",
-          "Oxirgi 20, 50 va 200 kundagi o'rtacha yopilish narxlari",
-          (
-              "Masalan: narx SMA200 dan yuqorida bo'lsa, uzoq muddatli o'sish"
-              " trendi ustun hisoblanadi."
-          ),
-      ],
-      [
-          "RSI (14)",
-          "Narx tezlashuvi va kuchini 0–100 oralig'ida o'lchovchi indikator",
-          (
-              "Masalan: RSI 30 dan past — haddan tashqari sotilgan zona, 70 dan"
-              " yuqori — qizigan zona."
-          ),
-      ],
-      [
-          "ATR (14)",
-          "Aksiyaning o'rtacha kunlik narx tebranish kengligi (volatillik)",
-          (
-              "Masalan: ATR $2.50 bo'lsa, kunlik harakat o'rtacha shu atrofda"
-              " kechishi mumkin."
-          ),
-      ],
-      [
-          "Support (20k) / Trendline (30k)",
-          "20 kunlik eng past narx zonasi va 30 kunlik chiziqli trend chizig'i",
-          (
-              "Masalan: kirish narxi pastki tayanch va trend chizig'iga yaqin"
-              " nuqtadan belgilanadi."
-          ),
-      ],
-      [
-          "Stop-Loss / Maqsad 1",
-          "Zararni cheklash nuqtasi va birinchi mo'ljallangan foyda darajasi",
-          (
-              "Masalan: narx Stop-Loss ostiga tushsa pozitsiya xavfini cheklash"
-              " haqida o'ylanadi."
-          ),
-      ],
+      ["Atama / Ko'rsatkich", "O'zbekcha Ma'nosi / Ta'rifi", "Misol / Izoh"],
+      ["Sektor", "Kompaniya faoliyat yuritadigan keng iqtisodiy soha", "Masalan: Texnologiya yoki Sog'liqni saqlash."],
+      ["Industriya", "Sektor ichidagi aniqroq biznes yo'nalishi", "Masalan: Yarimo'tkazgichlar (chip ishlab chiqarish)."],
+      ["Market Cap (Bozor Kapitallashuvi)", "Kompaniyaning umumiy bozor qiymati (Narx × Aksiyalar soni)", "Masalan: $500B+ yirik kompaniya hisoblanadi."],
+      ["Total Revenue (Yillik Tushum)", "Xarajatlar va soliqlar ayrilgungacha bo'lgan umumiy savdo", "Masalan: yillik tushum $80B bo'lsa, umumiy savdo shuncha."],
+      ["Net Income (Sof Foyda)", "Barcha xarajatlar, soliq va foizlar to'langach qolgan sof foyda", "Masalan: tushum $80B va sof foyda $20B bo'lsa, marja 25%."],
+      ["Operating Cash Flow (OCF)", "Asosiy operatsion faoliyatdan kelgan real naqd pul oqimi", "Masalan: OCF ijobiy bo'lsa, asosiy biznes pul yaratmoqda."],
+      ["Free Cash Flow (FCF)", "OCFdan kapital xarajatlar (Capex) ayrilgach qolgan erkin pul", "Masalan: FCF ijobiy bo'lsa, qarz to'lash va dividendga pul bor."],
+      ["Total Cash (Naqd Pul)", "Kompaniya hisobidagi naqd mablag' va likvid aktivlar", "Masalan: $735M naqd pul moliyaviy zaxira vazifasini bajaradi."],
+      ["Total Debt (Umumiy Qarz)", "Kompaniyaning qisqa va uzoq muddatli jami qarz majburiyatlari", "Masalan: qarzni naqd pul va bozor qiymati bilan solishtiring."],
+      ["P/E Ratio (TTM)", "Aksiya narxining 1 aksiyaga to'g'ri keladigan yillik foydaga nisbati", "Masalan: P/E = 20 bo'lsa, $1 foyda uchun bozorda $20 to'lanadi."],
+      ["SMA20 / SMA50 / SMA200", "Oxirgi 20, 50 va 200 kundagi o'rtacha yopilish narxlari", "Masalan: narx SMA200 dan yuqori bo'lsa uzoq muddatli trend o'suvchi."],
+      ["RSI (14)", "Narx kuchini 0–100 oralig'ida o'lchovchi indikator", "Masalan: RSI < 30 arzonlashgan zona, RSI > 70 qizigan zona."],
+      ["ATR (14)", "Aksiyaning o'rtacha kunlik narx tebranish kengligi", "Masalan: ATR $2.50 bo'lsa, kunlik tebranish shu atrofda."],
+      ["Support (20k) / Trendline (30k)", "20 kunlik tayanch zona va 30 kunlik chiziqli trend chizig'i", "Kirish narxi pastki tayanch va trend chizig'iga yaqin olinadi."],
+      ["Stop-Loss / Maqsad 1", "Zararni cheklash nuqtasi va birinchi maqsadli foyda darajasi", "Riskni boshqarish uchun oldindan belgilanadi."],
   ]
 
   summary_rows = [
       ["Ticker", sym, "Kompaniya / Indeks", m["ex_idx"]],
       ["Sektor", m["sec_disp"], "Industriya", m["ind_disp"]],
       ["IPO sanasi", m["ipo_date"], "Xodimlar soni", m["employees"] or "—"],
-      [
-          "Joriy narx ($)",
-          round(t["price"], 2),
-          "Kunlik o'zgarish (%)",
-          round(t["chg_pct"], 2),
-      ],
-      [
-          "Tavsiya etilgan kirish ($)",
-          round(e["entry_price"], 2),
-          "Kirish zonasi ($)",
-          f"{e['entry_low']:.2f} – {e['entry_high']:.2f}",
-      ],
-      [
-          "Support (20 kun) ($)",
-          round(e["support_20"], 2),
-          "Trendline (30 kun) ($)",
-          round(e["trend_val"], 2),
-      ],
-      [
-          "Stop-Loss ($)",
-          round(e["stop_loss"], 2),
-          "Maqsad (Target 1) ($)",
-          round(e["target_1"], 2),
-      ],
+      ["Joriy narx ($)", round(t["price"], 2), "Kunlik o'zgarish (%)", round(t["chg_pct"], 2)],
+      ["Tavsiya etilgan kirish ($)", round(e["entry_price"], 2), "Kirish zonasi ($)", f"{e['entry_low']:.2f} – {e['entry_high']:.2f}"],
+      ["Support (20 kun) ($)", round(e["support_20"], 2), "Trendline (30 kun) ($)", round(e["trend_val"], 2)],
+      ["Stop-Loss ($)", round(e["stop_loss"], 2), "Maqsad (Target 1) ($)", round(e["target_1"], 2)],
       ["SMA20 ($)", round(t["sma20"], 2), "SMA50 ($)", round(t["sma50"], 2)],
-      [
-          "SMA200 ($)",
-          round(t["sma200"], 2),
-          "AAOIFI Halol status",
-          "HALOL" if payload["halal"][0] else "MOS EMAS",
-      ],
+      ["SMA200 ($)", round(t["sma200"], 2), "AAOIFI Halol status", "HALOL" if payload["halal"][0] else "MOS EMAS"],
       ["RSI (14)", round(t["rsi"], 2), "ATR (14) ($)", round(t["atr"], 2)],
   ]
 
@@ -1001,24 +832,19 @@ def build_excel_report(sym, payload):
       ["Operating Cash Flow (OCF)", fmt_num(f["ocf"])],
       ["Free Cash Flow (FCF)", fmt_num(f["fcf"])],
       ["P/E (TTM)", f"{f['pe']:.2f}" if f["pe"] is not None else "Minus / Yo'q"],
-      [
-          "Forward P/E",
-          f"{f['fpe']:.2f}" if f["fpe"] is not None else "Minus / Yo'q",
-      ],
+      ["Forward P/E", f"{f['fpe']:.2f}" if f["fpe"] is not None else "Minus / Yo'q"],
   ]
 
   with pd.ExcelWriter(wb_buf, engine="openpyxl") as writer:
-    pd.DataFrame(
-        summary_rows,
-        columns=["Ko'rsatkich", "Qiymat", "Ko'rsatkich 2", "Qiymat 2"],
-    ).to_excel(writer, sheet_name="Asosiy_Tahlil", index=False)
-    pd.DataFrame(
-        fund_rows, columns=["Fundamental Ko'rsatkich", "Qiymat"]
-    ).to_excel(writer, sheet_name="Fundamental", index=False)
-    pd.DataFrame(
-        definitions, columns=["Atama", "O'zbekcha Ma'nosi", "Misol / Izoh"]
-    ).to_excel(writer, sheet_name="Atamalar_Lug'ati", index=False)
-
+    pd.DataFrame(summary_rows, columns=["Ko'rsatkich", "Qiymat", "Ko'rsatkich 2", "Qiymat 2"]).to_excel(
+        writer, sheet_name="Asosiy_Tahlil", index=False
+    )
+    pd.DataFrame(fund_rows, columns=["Fundamental Ko'rsatkich", "Qiymat"]).to_excel(
+        writer, sheet_name="Fundamental", index=False
+    )
+    pd.DataFrame(definitions, columns=["Atama", "O'zbekcha Ma'nosi", "Misol / Izoh"]).to_excel(
+        writer, sheet_name="Atamalar_Lug'ati", index=False
+    )
     for ws in writer.sheets.values():
       _auto_fit_columns(ws)
 
@@ -1047,58 +873,39 @@ def gather_stock_data(sym):
   rsi_s = calc_rsi(close)
   atr_s = calc_atr(hist)
   rsi = float(rsi_s.iloc[-1]) if not pd.isna(rsi_s.iloc[-1]) else 50.0
+  prev_rsi = float(rsi_s.iloc[-2]) if len(rsi_s) > 1 and not pd.isna(rsi_s.iloc[-2]) else rsi
+  min_rsi_5d = float(rsi_s.tail(5).min()) if len(rsi_s) >= 5 else rsi
+
   atr = float(atr_s.iloc[-1]) if not pd.isna(atr_s.iloc[-1]) else 0.0
   sma20 = float(close.rolling(20).mean().iloc[-1])
-  sma50 = (
-      float(close.rolling(50).mean().iloc[-1]) if len(close) >= 50 else sma20
-  )
-  sma200 = (
-      float(close.rolling(200).mean().iloc[-1]) if len(close) >= 200 else sma50
-  )
+  sma50 = float(close.rolling(50).mean().iloc[-1]) if len(close) >= 50 else sma20
+  sma200 = float(close.rolling(200).mean().iloc[-1]) if len(close) >= 200 else sma50
 
   inc = _df_attr(tk, ["financials", "income_stmt", "quarterly_financials"])
   bs = _df_attr(tk, ["balance_sheet", "quarterly_balance_sheet"])
   cf = _df_attr(tk, ["cashflow", "quarterly_cashflow"])
 
   shares = info.get("sharesOutstanding")
-  mcap = info.get("marketCap") or (
-      float(shares) * price if shares and price > 0 else None
-  )
-  rev = info.get("totalRevenue") or _row_val(
-      inc, ["Total Revenue", "Operating Revenue"]
-  )
-  net_inc = info.get("netIncomeToCommon") or _row_val(
-      inc, ["Net Income Common Stockholders", "Net Income"]
-  )
+  mcap = info.get("marketCap") or (float(shares) * price if shares and price > 0 else None)
+  rev = info.get("totalRevenue") or _row_val(inc, ["Total Revenue", "Operating Revenue"])
+  net_inc = info.get("netIncomeToCommon") or _row_val(inc, ["Net Income Common Stockholders", "Net Income"])
   int_inc = _row_val(inc, ["Interest Income", "Interest Income Non Operating"])
   cash = (
       info.get("totalCash")
       or info.get("cashAndCashEquivalents")
       or _row_val(bs, ["Cash And Cash Equivalents", "Cash Financial"])
   )
-  debt = info.get("totalDebt") or _row_val(
-      bs, ["Total Debt", "Long Term Debt And Capital Lease Obligation"]
-  )
+  debt = info.get("totalDebt") or _row_val(bs, ["Total Debt", "Long Term Debt And Capital Lease Obligation"])
   ocf = info.get("operatingCashflow") or _row_val(cf, ["Operating Cash Flow"])
   capex = _row_val(cf, ["Capital Expenditure", "Capital Expenditures"])
   fcf = info.get("freeCashflow")
   if fcf is None and ocf is not None and capex is not None:
-    fcf = (
-        float(ocf) + float(capex)
-        if float(capex) < 0
-        else float(ocf) - float(capex)
-    )
+    fcf = float(ocf) + float(capex) if float(capex) < 0 else float(ocf) - float(capex)
 
   pe = info.get("trailingPE")
   if pe is not None and float(pe) < 0:
     pe = None
-  if (
-      pe is None
-      and net_inc
-      and shares
-      and float(shares) > 0
-      and float(net_inc) > 0
-  ):
+  if pe is None and net_inc and shares and float(shares) > 0 and float(net_inc) > 0:
     pe = price / (float(net_inc) / float(shares))
 
   fpe = info.get("forwardPE")
@@ -1107,9 +914,7 @@ def gather_stock_data(sym):
 
   meta = resolve_company_meta(sym, info)
   entry = compute_entry_levels(hist, price, atr)
-  halal = eval_halal(
-      sym, meta["raw_sec"], meta["raw_ind"], rev, int_inc, debt, cash, mcap
-  )
+  halal = eval_halal(sym, meta["raw_sec"], meta["raw_ind"], rev, int_inc, debt, cash, mcap)
 
   return {
       "sym": sym,
@@ -1121,6 +926,8 @@ def gather_stock_data(sym):
           "price": price,
           "chg_pct": chg_pct,
           "rsi": rsi,
+          "prev_rsi": prev_rsi,
+          "min_rsi_5d": min_rsi_5d,
           "atr": atr,
           "sma20": sma20,
           "sma50": sma50,
@@ -1138,6 +945,15 @@ def gather_stock_data(sym):
           "fpe": fpe,
       },
   }
+
+
+def _safe_ai_summary(prompt, fallback_text):
+  try:
+    res = generate_gemini_text(prompt)
+    return res if res else fallback_text
+  except Exception as e:
+    logger.warning("AI xulosa xatosi: %s", e)
+    return fallback_text
 
 
 def format_analysis_by_level(p, level):
@@ -1180,10 +996,12 @@ def format_analysis_by_level(p, level):
   )
 
   if level == "basic":
-    ai_note = generate_gemini_text(
+    ai_note = _safe_ai_summary(
         f"{sym} aksiyasini boshlang'ich o'quvchi uchun juda sodda o'zbek"
         f" tilida 3-4 gapda tushuntir: narx ${t['price']:.2f}, kirish"
-        f" ${e['entry_price']:.2f}, RSI {t['rsi']:.1f}, sektor {m['sec_disp']}."
+        f" ${e['entry_price']:.2f}, RSI {t['rsi']:.1f}, sektor {m['sec_disp']}.",
+        f"{sym} joriy narxi ${t['price']:.2f}, RSI {t['rsi']:.1f} darajada."
+        f" Kuzatish uchun tayanch zona ${e['entry_price']:.2f} atrofida.",
     )
     return (
         f"🟢 <b>{sym} — BOSHLANG'ICH TAHLIL</b>\n"
@@ -1201,11 +1019,14 @@ def format_analysis_by_level(p, level):
     )
 
   if level == "mid":
-    ai_note = generate_gemini_text(
+    ai_note = _safe_ai_summary(
         f"{sym} uchun o'rta darajadagi treyder/investor tahlili (o'zbek"
         f" tilida, 4-5 gap): narx ${t['price']:.2f}, SMA20/50/200:"
         f" {t['sma20']:.2f}/{t['sma50']:.2f}/{t['sma200']:.2f}, RSI"
-        f" {t['rsi']:.1f}, P/E {pe_str}, kirish ${e['entry_price']:.2f}."
+        f" {t['rsi']:.1f}, P/E {pe_str}, kirish ${e['entry_price']:.2f}.",
+        f"{sym} ${t['price']:.2f} atrofida savdo qilmoqda; SMA200"
+        f" ${t['sma200']:.2f}, RSI {t['rsi']:.1f}. Kirish zonasi"
+        f" ${e['entry_price']:.2f}, Stop-Loss ${e['stop_loss']:.2f}.",
     )
     return (
         f"🟡 <b>{sym} — O'RTA DARAJADAGI TAHLIL</b>\n"
@@ -1225,13 +1046,16 @@ def format_analysis_by_level(p, level):
         f"🧠 <b>O'rta daraja xulosasi:</b> {html.escape(ai_note)}{footer_help}"
     )
 
-  ai_note = generate_gemini_text(
+  ai_note = _safe_ai_summary(
       f"{sym} bo'yicha chuqur institutsional va texnik tahlil (o'zbek"
       f" tilida, 5-6 gap): narx ${t['price']:.2f}, kirish"
       f" ${e['entry_price']:.2f}, support ${e['support_20']:.2f}, trendline"
       f" ${e['trend_val']:.2f}, RSI {t['rsi']:.1f}, P/E {pe_str}, Cash"
       f" {fmt_num(f['cash'])}, Debt {fmt_num(f['debt'])}, FCF"
-      f" {fmt_num(f['fcf'])}."
+      f" {fmt_num(f['fcf'])}.",
+      f"{sym} joriy narxi ${t['price']:.2f}, support ${e['support_20']:.2f},"
+      f" naqd pul {fmt_num(f['cash'])} va umumiy qarz {fmt_num(f['debt'])}."
+      f" Batafsil jadval Excel faylda taqdim etildi.",
   )
   return (
       f"🔴 <b>{sym} — YUQORI DARAJADAGI TAHLIL (+ EXCEL)</b>\n"
@@ -1266,15 +1090,29 @@ def run_scanner(force=False):
       p = gather_stock_data(sym)
       if not p:
         continue
-      pe, rsi = p["fund"]["pe"], p["tech"]["rsi"]
-      if (
-          pe is not None
-          and SIGNAL_PE_MIN <= pe <= SIGNAL_PE_MAX
-          and SIGNAL_RSI_MIN <= rsi <= SIGNAL_RSI_MAX
-      ):
+      price = p["tech"]["price"]
+      mcap = p["fund"]["mcap"]
+      # 1. Penny stocklarni chiqarib tashlash ($10+ va MCap $2B+)
+      if price < MIN_STOCK_PRICE:
+        continue
+      if mcap is None or float(mcap) < MIN_MARKET_CAP:
+        continue
+
+      rsi = p["tech"]["rsi"]
+      prev_rsi = p["tech"]["prev_rsi"]
+      min_5d = p["tech"]["min_rsi_5d"]
+
+      # 2. RSI 20-30 oralig'idan yuqoriga burilgan (trend boshlanishi)
+      # Oxirgi 5 kunda RSI <= 30 (va >= 15) bo'lgan, bugun esa RSI 30-42 oralig'iga ko'tarilib o'sish boshlagan
+      crossed_up = (prev_rsi < RSI_BREAKOUT_LEVEL <= rsi <= 42.0) and (min_5d >= 15.0)
+      rebounding_zone = (RSI_OVERSOLD_FLOOR <= min_5d < RSI_BREAKOUT_LEVEL) and (rsi > prev_rsi) and (28.0 <= rsi <= 38.0)
+
+      if crossed_up or rebounding_zone:
+        halal_tag = "✅ Halol" if p["halal"][0] else "❌ Mos emas"
         out.append(
-            f"• <b>{sym}</b>: ${p['tech']['price']:.2f} | RSI {rsi:.1f} |"
-            f" P/E {pe:.2f} | Kirish ${p['entry']['entry_price']:.2f}"
+            f"• <b>{sym}</b> (${price:.2f} | MCap {fmt_num(mcap)})\n"
+            f"  📈 RSI burilish: <b>{min_5d:.1f} → {rsi:.1f}</b> (Trend boshlanmoqda)\n"
+            f"  🎯 Kirish: <b>${p['entry']['entry_price']:.2f}</b> | {halal_tag}"
         )
     except Exception:
       continue
@@ -1284,12 +1122,80 @@ def run_scanner(force=False):
 
 
 # ==========================================
-# 5. TELEGRAM HANDLERLAR
+# 7. KLAVIATURA VA XABAR YUBORISH
+# ==========================================
+def get_main_keyboard():
+  kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+  kb.row(
+      types.KeyboardButton(BTN_AI_ANALYSIS),
+      types.KeyboardButton(BTN_ALGO_SIGNALS),
+  )
+  kb.row(types.KeyboardButton(BTN_AI_HELP), types.KeyboardButton(BTN_BALANCE))
+  kb.row(types.KeyboardButton(BTN_REFERRAL), types.KeyboardButton(BTN_ADMIN))
+  kb.row(types.KeyboardButton(BTN_NEWS))
+  return kb
+
+
+def get_level_keyboard():
+  kb = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+  kb.row(types.KeyboardButton(LVL_BASIC), types.KeyboardButton(LVL_MID))
+  kb.row(types.KeyboardButton(LVL_HIGH))
+  return kb
+
+
+def _split_message(text, limit=3900):
+  if len(text) <= limit:
+    return [text]
+  parts = []
+  current = ""
+  for line in text.splitlines(keepends=True):
+    if len(line) > limit:
+      if current:
+        parts.append(current)
+        current = ""
+      for i in range(0, len(line), limit):
+        parts.append(line[i : i + limit])
+      continue
+    if len(current) + len(line) > limit:
+      parts.append(current)
+      current = line
+    else:
+      current += line
+  if current:
+    parts.append(current)
+  return parts or [text[:limit]]
+
+
+def safe_send(chat_id, text, reply_markup=None):
+  chunks = _split_message(text)
+  for idx, chunk in enumerate(chunks):
+    markup = reply_markup if idx == len(chunks) - 1 else None
+    try:
+      bot.send_message(
+          chat_id,
+          chunk,
+          parse_mode="HTML",
+          reply_markup=markup,
+          disable_web_page_preview=True,
+      )
+    except Exception:
+      plain = html.unescape(re.sub(r"<[^>]+>", "", chunk))
+      bot.send_message(
+          chat_id,
+          plain,
+          reply_markup=markup,
+          disable_web_page_preview=True,
+      )
+
+
+# ==========================================
+# 8. TELEGRAM HANDLERLAR
 # ==========================================
 @bot.message_handler(commands=["start"])
 def cmd_start(msg):
   uid, cid = msg.from_user.id, msg.chat.id
   register_chat(cid)
+  track_user_profile(msg)
   parts = (msg.text or "").split(maxsplit=1)
   if len(parts) > 1 and parts[1].startswith("ref_"):
     try:
@@ -1301,7 +1207,7 @@ def cmd_start(msg):
         )
     except Exception:
       pass
-  USER_STATE[cid] = {"mode": "analysis", "level": "basic"}
+  set_user_state(cid, mode="analysis", level="basic")
   safe_send(
       cid,
       "👋 Assalomu alaykum! AI aksiya tahlil tizimiga xush kelibsiz.\n"
@@ -1317,33 +1223,67 @@ def handle_all(msg):
   txt = (msg.text or "").strip()
   low = txt.lower()
   register_chat(cid)
+  track_user_profile(msg)
 
   if is_admin(uid) and cid in ADMIN_AWAITING_CMD:
-    ADMIN_AWAITING_CMD.discard(cid)
     parts = txt.split()
-    if len(parts) >= 2 and parts[0].lower() == "vip":
+    cmd_word = parts[0].lower() if parts else ""
+
+    if cmd_word == "users":
+      ADMIN_AWAITING_CMD.discard(cid)
+      profiles = STORE.get("user_profiles", {})
+      if not profiles:
+        safe_send(cid, "Hozircha foydalanuvchilar ro'yxati bo'sh.", reply_markup=get_main_keyboard())
+        return
+      lines = ["👥 <b>Foydalanuvchilar ro'yxati:</b>\n"]
+      for u_id, info in list(profiles.items())[-30:]:
+        t_hist = ", ".join(info.get("tickers", [])[-5:]) or "hali izlamagan"
+        lines.append(
+            f"• <b>{html.escape(info.get('name', '—'))}</b> ({html.escape(info.get('username', '—'))})\n"
+            f"  ID: <code>{u_id}</code> | So'nggi kirish: {info.get('last_seen', '—')}\n"
+            f"  Izlagan aksiyalari: <code>{html.escape(t_hist)}</code>"
+        )
+      safe_send(cid, "\n".join(lines), reply_markup=get_main_keyboard())
+      return
+
+    if cmd_word == "logs":
+      ADMIN_AWAITING_CMD.discard(cid)
+      logs = STORE.get("search_logs", [])
+      if not logs:
+        safe_send(cid, "Hozircha qidiruv tarixi bo'sh.", reply_markup=get_main_keyboard())
+        return
+      lines = ["🔎 <b>So'nggi izlangan aksiyalar (oxirgi 25 ta):</b>\n"]
+      for item in reversed(logs[-25:]):
+        uname = f" ({item['username']})" if item.get("username") else ""
+        lines.append(
+            f"• <code>{item['time']}</code> — <b>{html.escape(item['name'])}</b>{html.escape(uname)}: "
+            f"<b>{item['ticker']}</b> [{item['level']}]"
+        )
+      safe_send(cid, "\n".join(lines), reply_markup=get_main_keyboard())
+      return
+
+    if len(parts) >= 2 and cmd_word == "vip":
+      ADMIN_AWAITING_CMD.discard(cid)
       try:
         set_vip(int(parts[1]), True)
-        safe_send(
-            cid, f"✅ {parts[1]} VIP qilindi.", reply_markup=get_main_keyboard()
-        )
-        return
-      except Exception:
-        pass
-    if len(parts) >= 2 and parts[0].lower() == "reset":
-      try:
-        reset_limit(int(parts[1]))
-        safe_send(
-            cid,
-            f"✅ {parts[1]} limiti tiklandi.",
-            reply_markup=get_main_keyboard(),
-        )
+        safe_send(cid, f"✅ {parts[1]} VIP qilindi.", reply_markup=get_main_keyboard())
         return
       except Exception:
         pass
 
+    if len(parts) >= 2 and cmd_word == "reset":
+      ADMIN_AWAITING_CMD.discard(cid)
+      try:
+        reset_limit(int(parts[1]))
+        safe_send(cid, f"✅ {parts[1]} limiti tiklandi.", reply_markup=get_main_keyboard())
+        return
+      except Exception:
+        pass
+
+    ADMIN_AWAITING_CMD.discard(cid)
+
   if low in {"🧠 ai tahlil", "ai tahlil"}:
-    USER_STATE[cid] = {"mode": "analysis", "level": "basic"}
+    set_user_state(cid, mode="analysis")
     safe_send(
         cid,
         "🎯 <b>Tahlil darajasini tanlang:</b>\n"
@@ -1355,32 +1295,23 @@ def handle_all(msg):
     return
 
   if txt in {LVL_BASIC, LVL_MID, LVL_HIGH}:
-    lvl = (
-        "basic"
-        if txt == LVL_BASIC
-        else ("mid" if txt == LVL_MID else "high")
-    )
-    USER_STATE[cid] = {"mode": "analysis", "level": lvl}
-    note = (
-        " (natija bilan birga <b>Excel</b> fayl ham yuboriladi)"
-        if lvl == "high"
-        else ""
-    )
+    lvl = "basic" if txt == LVL_BASIC else ("mid" if txt == LVL_MID else "high")
+    set_user_state(cid, mode="analysis", level=lvl)
+    note = " (natija bilan birga <b>Excel</b> fayl ham yuboriladi)" if lvl == "high" else ""
     safe_send(
         cid,
         f"✅ Daraja tanlandi: <b>{txt}</b>{note}.\n"
-        "Endi aksiya tickerini yuboring (masalan: <code>AAPL</code>,"
-        " <code>NVDA</code>, <code>TSM</code>).",
+        "Endi aksiya tickerini yuboring (masalan: <code>AAPL</code>, <code>NVDA</code>, <code>TSM</code>).",
         reply_markup=get_main_keyboard(),
     )
     return
 
   if low in {"💬 ai yordam", "ai yordam"}:
-    USER_STATE[cid] = {"mode": "help", "level": "basic"}
+    set_user_state(cid, mode="help")
     safe_send(
         cid,
         "💬 <b>AI Yordam</b> faol. Muammoli tahlil matnini shu yerga tashlang"
-        " yoki savolingizni yozing.",
+        " yoki istalgan savolingizni yozing.",
         reply_markup=get_main_keyboard(),
     )
     return
@@ -1415,14 +1346,15 @@ def handle_all(msg):
     bot.send_chat_action(cid, "typing")
     matches = run_scanner()
     body = (
-        "\n".join(matches)
+        "\n\n".join(matches)
         if matches
-        else "Hozircha filtrga mos aksiya topilmadi."
+        else "Hozircha RSI 20 → 30 burilish nuqtasiga chiqqan yirik aksiya topilmadi."
     )
     safe_send(
         cid,
-        f"📊 <b>Algoritmik signallar</b> (RSI {SIGNAL_RSI_MIN}-{SIGNAL_RSI_MAX},"
-        f" P/E {SIGNAL_PE_MIN}-{SIGNAL_PE_MAX}):\n{body}",
+        "📊 <b>Algoritmik signallar (Trend boshlanishi)</b>\n"
+        f"<i>Filtr: Narx &ge; ${MIN_STOCK_PRICE:.0f} (penny stocklarsiz), MCap &ge; $2B, "
+        f"RSI {RSI_OVERSOLD_FLOOR:.0f} → {RSI_BREAKOUT_LEVEL:.0f}+ burilish</i>\n\n{body}",
         reply_markup=get_main_keyboard(),
     )
     return
@@ -1436,37 +1368,54 @@ def handle_all(msg):
       safe_send(cid, "⛔ Bu bo'lim faqat admin uchun.")
       return
     ADMIN_AWAITING_CMD.add(cid)
+    total_users = max(len(STORE.get("users", {})), len(STORE.get("user_profiles", {})))
     safe_send(
         cid,
         "⚙️ <b>Admin Panel</b>\n"
-        f"• Foydalanuvchilar: <b>{len(STORE.get('users', {}))}</b> |"
-        f" VIP: <b>{len(STORE.get('vip_users', []))}</b>\n"
-        "Buyruq yuboring: <code>vip USER_ID</code> yoki"
-        " <code>reset USER_ID</code>",
+        f"• Jami foydalanuvchilar: <b>{total_users}</b> | VIP: <b>{len(STORE.get('vip_users', []))}</b>\n"
+        f"• Qidiruvlar soni: <b>{len(STORE.get('search_logs', []))}</b>\n"
+        f"• Faol modellar: <code>{', '.join(ACTIVE_GEMINI_MODELS)}</code>\n\n"
+        "<b>Buyruqlardan birini yuboring:</b>\n"
+        "• <code>users</code> — foydalanuvchilar va izlagan aksiyalari\n"
+        "• <code>logs</code> — so'nggi izlangan aksiyalar tarixi\n"
+        "• <code>vip USER_ID</code> — VIP berish\n"
+        "• <code>reset USER_ID</code> — limitni tiklash",
     )
     return
 
-  st = USER_STATE.get(cid, {"mode": "analysis", "level": "basic"})
+  st = get_user_state(cid)
   if st.get("mode") == "help":
     bot.send_chat_action(cid, "typing")
-    ans = generate_gemini_text(
-        "Moliya va aksiyalar bo'yicha foydalanuvchiga tushunarli qilib javob"
-        " ber (agar tahlil natijasi tashlangan bo'lsa, uni tahlil qilib"
-        f" tushuntirib ber):\n{txt}"
+    help_prompt = (
+        "Sen moliyaviy tahlil bo'yicha sodda va tushunarli yordamchisan.\n"
+        "Foydalanuvchi yuborgan matn yoki savol asosida o'zbek tilida"
+        " aniq, tushunarli va oddiy tilda javob ber.\n\n"
+        f"Foydalanuvchi xabari:\n{txt}"
     )
-    safe_send(
-        cid,
-        html.escape(ans) if ans else "Javob topilmadi.",
-        reply_markup=get_main_keyboard(),
-    )
+    try:
+      ans = generate_gemini_text(help_prompt)
+      safe_send(
+          cid,
+          html.escape(ans)
+          if ans
+          else "⚠️ AI hozircha javob qaytara olmadi. 10 soniyadan so'ng qayta yuboring.",
+          reply_markup=get_main_keyboard(),
+      )
+    except Exception as e:
+      logger.error("AI Yordam xatosi: %s", e)
+      safe_send(
+          cid,
+          "⚠️ AI Yordam vaqtincha band yoki uzilishda. 10–15 soniyadan so'ng qayta urinib ko'ring.",
+          reply_markup=get_main_keyboard(),
+      )
     return
 
   ticker_cand = txt.upper().replace(".", "-")
   if not re.fullmatch(r"[A-Z0-9\-]{1,10}", ticker_cand):
     safe_send(
         cid,
-        "Iltimos, aksiya tickerini kiriting (masalan: <code>AAPL</code>) yoki"
-        " menyudan bo'lim tanlang.",
+        "Iltimos, aksiya tickerini kiriting (masalan: <code>AAPL</code>)"
+        " yoki savol berish uchun <b>💬 AI Yordam</b> tugmasini bosing.",
         reply_markup=get_main_keyboard(),
     )
     return
@@ -1488,6 +1437,7 @@ def handle_all(msg):
       )
       return
 
+    log_user_search(msg, ticker_cand, level)
     report_txt = format_analysis_by_level(payload, level)
     safe_send(cid, report_txt, reply_markup=get_main_keyboard())
 
@@ -1512,6 +1462,7 @@ def handle_all(msg):
 
 def run_bot_forever():
   threading.Thread(target=_start_keep_alive, daemon=True).start()
+  threading.Thread(target=refresh_available_models, daemon=True).start()
   threading.Thread(target=fetch_and_cache_news, daemon=True).start()
   logger.info("Bot ishga tushdi...")
   while True:
@@ -1520,8 +1471,8 @@ def run_bot_forever():
           skip_pending=True, timeout=20, long_polling_timeout=20
       )
     except Exception as e:
-      logger.warning("Polling uzildi: %s", e)
-      time.sleep(5)
+      logger.warning("Polling uzildi, 3 soniyada qayta ulanmoqda: %s", e)
+      time.sleep(3)
 
 
 if __name__ == "__main__":
