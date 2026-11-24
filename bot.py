@@ -1,7 +1,7 @@
 # ==========================================
 # 0. RENDER / MUHIT SOZLAMALARI
 # ==========================================
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import html
 from io import BytesIO, StringIO
@@ -27,6 +27,13 @@ import yfinance as yf
 def _env(name, default=""):
   v = os.environ.get(name)
   return v.strip() if v and str(v).strip() else default
+
+
+TASHKENT_TZ = timezone(timedelta(hours=5))
+
+
+def now_tashkent():
+  return datetime.now(TASHKENT_TZ)
 
 
 # ==========================================
@@ -78,10 +85,10 @@ ADMIN_IDS = {ADMIN_ID}
 ADMIN_LINK = "EAA_7879"
 
 # Algoritmik signal filtrlari (Penny stocklarsiz + RSI 20 -> 30 burilish)
-MIN_STOCK_PRICE = 10.0         # $10 dan arzon penny stocklar chiqarib tashlanadi
-MIN_MARKET_CAP = 2_000_000_000 # $2B dan kichik kompaniyalar kirmaydi
-RSI_OVERSOLD_FLOOR = 20.0      # Oxirgi kunlarda tushgan minimal RSI zonasi
-RSI_BREAKOUT_LEVEL = 30.0      # Bugun kesib o'tgan trend boshlanish chizig'i
+MIN_STOCK_PRICE = 10.0          # $10 dan arzon penny stocklar chiqarib tashlanadi
+MIN_MARKET_CAP = 2_000_000_000  # $2B dan kichik kompaniyalar kirmaydi
+RSI_OVERSOLD_FLOOR = 20.0       # Oxirgi kunlarda tushgan minimal RSI zonasi
+RSI_BREAKOUT_LEVEL = 30.0       # Bugun kesib o'tgan trend boshlanish chizig'i
 
 SCANNER_CACHE_TTL = 600
 REFERRAL_REWARD_COINS = 10.0
@@ -275,9 +282,9 @@ def fetch_and_cache_news():
       )
       res = generate_gemini_text(prompt)
       if res:
-        updated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
+        updated_at = now_tashkent().strftime("%Y-%m-%d %H:%M")
         NEWS_CACHE["data"] = (
-            f"📰 <b>Global Bozor Yangiliklari</b> <i>({updated_at})</i>:\n\n"
+            f"📰 <b>Global Bozor Yangiliklari</b> <i>({updated_at} TSh)</i>:\n\n"
             f"{html.escape(res)}"
         )
         NEWS_CACHE["last_updated"] = time.time()
@@ -326,6 +333,15 @@ def save_store(d):
 STORE = load_store()
 
 
+def get_total_users_count():
+  all_uids = set()
+  for k in STORE.get("user_profiles", {}).keys():
+    all_uids.add(str(k))
+  for k in STORE.get("users", {}).keys():
+    all_uids.add(str(k))
+  return len(all_uids)
+
+
 def track_user_profile(msg):
   u = msg.from_user
   if not u:
@@ -338,7 +354,7 @@ def track_user_profile(msg):
   profiles[uid] = {
       "name": full_name,
       "username": username,
-      "last_seen": datetime.now().strftime("%Y-%m-%d %H:%M"),
+      "last_seen": now_tashkent().strftime("%Y-%m-%d %H:%M"),
       "tickers": cur.get("tickers", []),
   }
   save_store(STORE)
@@ -351,13 +367,13 @@ def log_user_search(msg, ticker, level):
   uid = str(int(u.id))
   full_name = f"{u.first_name or ''} {u.last_name or ''}".strip() or "Noma'lum"
   username = f"@{u.username}" if u.username else ""
-  now_str = datetime.now().strftime("%m-%d %H:%M")
+  now_str = now_tashkent().strftime("%m-%d %H:%M")
 
   profiles = STORE.setdefault("user_profiles", {})
   p = profiles.setdefault(
       uid, {"name": full_name, "username": username or "yo'q", "tickers": []}
   )
-  p["last_seen"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+  p["last_seen"] = now_tashkent().strftime("%Y-%m-%d %H:%M")
   t_list = p.setdefault("tickers", [])
   t_list.append(ticker)
   if len(t_list) > 20:
@@ -449,11 +465,11 @@ def set_vip(uid, flag=True):
 
 
 def _today():
-  return datetime.now().strftime("%Y-%m-%d")
+  return now_tashkent().strftime("%Y-%m-%d")
 
 
 def _month():
-  return datetime.now().strftime("%Y-%m")
+  return now_tashkent().strftime("%Y-%m")
 
 
 def _usage_rec(uid):
@@ -1092,7 +1108,6 @@ def run_scanner(force=False):
         continue
       price = p["tech"]["price"]
       mcap = p["fund"]["mcap"]
-      # 1. Penny stocklarni chiqarib tashlash ($10+ va MCap $2B+)
       if price < MIN_STOCK_PRICE:
         continue
       if mcap is None or float(mcap) < MIN_MARKET_CAP:
@@ -1102,8 +1117,6 @@ def run_scanner(force=False):
       prev_rsi = p["tech"]["prev_rsi"]
       min_5d = p["tech"]["min_rsi_5d"]
 
-      # 2. RSI 20-30 oralig'idan yuqoriga burilgan (trend boshlanishi)
-      # Oxirgi 5 kunda RSI <= 30 (va >= 15) bo'lgan, bugun esa RSI 30-42 oralig'iga ko'tarilib o'sish boshlagan
       crossed_up = (prev_rsi < RSI_BREAKOUT_LEVEL <= rsi <= 42.0) and (min_5d >= 15.0)
       rebounding_zone = (RSI_OVERSOLD_FLOOR <= min_5d < RSI_BREAKOUT_LEVEL) and (rsi > prev_rsi) and (28.0 <= rsi <= 38.0)
 
@@ -1232,15 +1245,20 @@ def handle_all(msg):
     if cmd_word == "users":
       ADMIN_AWAITING_CMD.discard(cid)
       profiles = STORE.get("user_profiles", {})
+      total_cnt = get_total_users_count()
       if not profiles:
-        safe_send(cid, "Hozircha foydalanuvchilar ro'yxati bo'sh.", reply_markup=get_main_keyboard())
+        safe_send(
+            cid,
+            f"👥 Jami foydalanuvchilar: <b>{total_cnt}</b>\nHozircha profil ma'lumotlari bo'sh.",
+            reply_markup=get_main_keyboard(),
+        )
         return
-      lines = ["👥 <b>Foydalanuvchilar ro'yxati:</b>\n"]
+      lines = [f"👥 <b>Jami foydalanuvchilar: {total_cnt} ta</b>\n"]
       for u_id, info in list(profiles.items())[-30:]:
         t_hist = ", ".join(info.get("tickers", [])[-5:]) or "hali izlamagan"
         lines.append(
             f"• <b>{html.escape(info.get('name', '—'))}</b> ({html.escape(info.get('username', '—'))})\n"
-            f"  ID: <code>{u_id}</code> | So'nggi kirish: {info.get('last_seen', '—')}\n"
+            f"  ID: <code>{u_id}</code> | So'nggi kirish: {info.get('last_seen', '—')} TSh\n"
             f"  Izlagan aksiyalari: <code>{html.escape(t_hist)}</code>"
         )
       safe_send(cid, "\n".join(lines), reply_markup=get_main_keyboard())
@@ -1252,7 +1270,7 @@ def handle_all(msg):
       if not logs:
         safe_send(cid, "Hozircha qidiruv tarixi bo'sh.", reply_markup=get_main_keyboard())
         return
-      lines = ["🔎 <b>So'nggi izlangan aksiyalar (oxirgi 25 ta):</b>\n"]
+      lines = ["🔎 <b>So'nggi izlangan aksiyalar (oxirgi 25 ta, Toshkent vaqti):</b>\n"]
       for item in reversed(logs[-25:]):
         uname = f" ({item['username']})" if item.get("username") else ""
         lines.append(
@@ -1368,15 +1386,15 @@ def handle_all(msg):
       safe_send(cid, "⛔ Bu bo'lim faqat admin uchun.")
       return
     ADMIN_AWAITING_CMD.add(cid)
-    total_users = max(len(STORE.get("users", {})), len(STORE.get("user_profiles", {})))
+    total_users = get_total_users_count()
     safe_send(
         cid,
         "⚙️ <b>Admin Panel</b>\n"
-        f"• Jami foydalanuvchilar: <b>{total_users}</b> | VIP: <b>{len(STORE.get('vip_users', []))}</b>\n"
+        f"• Jami foydalanuvchilar: <b>{total_users} ta</b> | VIP: <b>{len(STORE.get('vip_users', []))}</b>\n"
         f"• Qidiruvlar soni: <b>{len(STORE.get('search_logs', []))}</b>\n"
         f"• Faol modellar: <code>{', '.join(ACTIVE_GEMINI_MODELS)}</code>\n\n"
         "<b>Buyruqlardan birini yuboring:</b>\n"
-        "• <code>users</code> — foydalanuvchilar va izlagan aksiyalari\n"
+        "• <code>users</code> — foydalanuvchilar soni, ro'yxati va izlagan aksiyalari\n"
         "• <code>logs</code> — so'nggi izlangan aksiyalar tarixi\n"
         "• <code>vip USER_ID</code> — VIP berish\n"
         "• <code>reset USER_ID</code> — limitni tiklash",
