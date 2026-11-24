@@ -1,1 +1,18 @@
 
+{
+  "sectors": {
+    "Technology": "Texnologiyalar",
+    "Healthcare": "Sog‘liqni saqlash"
+  },
+  "industries": {
+    "Semiconductors": "Yarimo‘tkazgichlar"
+  },
+  "stocks": {
+    "AAPL": {
+      "ipo_date": "1980-12-12",
+      "employees": 161000,
+      "sector": "Technology",
+      "industry": "Consumer Electronics"
+    }
+  }
+}
