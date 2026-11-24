@@ -30,26 +30,32 @@ def _env(name, default=""):
 
 
 # ==========================================
-# 1. STATIK JSON BAZANI O'QISH
+# 1. STATIK JSON BAZANI O'QISH (KESH BILAN)
 # ==========================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DATA_PATH = os.path.join(BASE_DIR, "static", "static_data.json")
+_STATIC_CACHE = None
 
 
-def load_static_data():
+def load_static_data(force=False):
+  global _STATIC_CACHE
+  if _STATIC_CACHE is not None and not force:
+    return _STATIC_CACHE
   if os.path.exists(STATIC_DATA_PATH):
     try:
       with open(STATIC_DATA_PATH, "r", encoding="utf-8") as f:
         data = json.load(f)
       if isinstance(data, dict):
-        return {
+        _STATIC_CACHE = {
             "sectors": data.get("sectors") or {},
             "industries": data.get("industries") or {},
             "stocks": data.get("stocks") or {},
         }
+        return _STATIC_CACHE
     except Exception as e:
       logging.error("static_data.json xatosi: %s", e)
-  return {"sectors": {}, "industries": {}, "stocks": {}}
+  _STATIC_CACHE = {"sectors": {}, "industries": {}, "stocks": {}}
+  return _STATIC_CACHE
 
 
 # ==========================================
@@ -68,6 +74,7 @@ ADMIN_LINK = "EAA_7879"
 
 SIGNAL_PE_MIN, SIGNAL_PE_MAX = 10.0, 25.0
 SIGNAL_RSI_MIN, SIGNAL_RSI_MAX = 20.0, 30.0
+SCANNER_CACHE_TTL = 600  # 10 daqiqa
 REFERRAL_REWARD_COINS = 10.0
 DAILY_FREE_LIMIT = 5
 MONTHLY_FREE_LIMIT = 20
@@ -93,6 +100,7 @@ SCAN_WATCHLIST = [
 USAGE_FILE = "/tmp/bot_usage.json"
 INDEX_CACHE = {}
 INDUSTRY_CACHE = {}
+SCANNER_CACHE = {"items": [], "ts": 0}
 INDEX_DISK_CACHE = "/tmp/indices.pkl"
 INDEX_CACHE_TTL = 86400
 
@@ -228,6 +236,11 @@ def _start_keep_alive():
   HTTPServer(("0.0.0.0", port), _HealthHandler).serve_forever()
 
 
+def _clean_plain_text(txt):
+  cleaned = re.sub(r"[*_`#]+", "", txt or "")
+  return cleaned.strip()
+
+
 def generate_gemini_text(prompt, retries=2):
   last_err = None
   for model in GEMINI_MODELS:
@@ -235,7 +248,7 @@ def generate_gemini_text(prompt, retries=2):
       try:
         r = client.models.generate_content(model=model, contents=prompt)
         if r.text and r.text.strip():
-          return r.text.strip()
+          return _clean_plain_text(r.text)
       except Exception as e:
         last_err = e
         s = str(e)
@@ -258,7 +271,8 @@ def fetch_and_cache_news():
     try:
       prompt = (
           "Qisqa va tushunarli o'zbek tilida so'nggi 24-48 soat ichidagi eng"
-          " muhim global iqtisodiy va aksiya bozori yangiliklarini yozib ber."
+          " muhim global iqtisodiy va aksiya bozori yangiliklarini oddiy"
+          " matn (yulduzcha va maxsus belgilarsiz) ko'rinishida yozib ber."
           " AQSh fond bozori, inflyatsiya tendensiyalari va yirik"
           " kompaniyalar yangiliklariga urg'u ber. Har bir yangilikning"
           " aksiyalarga ehtimoliy ta'sirini qisqa ko'rsat."
@@ -295,22 +309,49 @@ def get_level_keyboard():
   return kb
 
 
+def _split_message(text, limit=3900):
+  if len(text) <= limit:
+    return [text]
+  parts = []
+  current = ""
+  for line in text.splitlines(keepends=True):
+    if len(line) > limit:
+      if current:
+        parts.append(current)
+        current = ""
+      for i in range(0, len(line), limit):
+        parts.append(line[i : i + limit])
+      continue
+    if len(current) + len(line) > limit:
+      parts.append(current)
+      current = line
+    else:
+      current += line
+  if current:
+    parts.append(current)
+  return parts or [text[:limit]]
+
+
 def safe_send(chat_id, text, reply_markup=None):
-  try:
-    bot.send_message(
-        chat_id,
-        text,
-        parse_mode="HTML",
-        reply_markup=reply_markup,
-        disable_web_page_preview=True,
-    )
-  except Exception:
-    bot.send_message(
-        chat_id,
-        html.unescape(re.sub(r"<[^>]+>", "", text)),
-        reply_markup=reply_markup,
-        disable_web_page_preview=True,
-    )
+  chunks = _split_message(text)
+  for idx, chunk in enumerate(chunks):
+    markup = reply_markup if idx == len(chunks) - 1 else None
+    try:
+      bot.send_message(
+          chat_id,
+          chunk,
+          parse_mode="HTML",
+          reply_markup=markup,
+          disable_web_page_preview=True,
+      )
+    except Exception:
+      plain = html.unescape(re.sub(r"<[^>]+>", "", chunk))
+      bot.send_message(
+          chat_id,
+          plain,
+          reply_markup=markup,
+          disable_web_page_preview=True,
+      )
 
 
 def _today():
@@ -718,7 +759,7 @@ def compute_entry_levels(hist, price, atr):
   }
 
 
-def eval_halal(sym, sec_en, ind_en, rev, int_inc, debt, cash, mcap, assets):
+def eval_halal(sym, sec_en, ind_en, rev, int_inc, debt, cash, mcap):
   s, i = (sec_en or "").lower(), (ind_en or "").lower()
   sec_haram = sym.upper() in HARAM_TICKERS or any(
       k in s or k in i for k in HARAM_KEYWORDS
@@ -1038,7 +1079,6 @@ def gather_stock_data(sym):
   debt = info.get("totalDebt") or _row_val(
       bs, ["Total Debt", "Long Term Debt And Capital Lease Obligation"]
   )
-  assets = info.get("totalAssets") or _row_val(bs, ["Total Assets"])
   ocf = info.get("operatingCashflow") or _row_val(cf, ["Operating Cash Flow"])
   capex = _row_val(cf, ["Capital Expenditure", "Capital Expenditures"])
   fcf = info.get("freeCashflow")
@@ -1052,7 +1092,13 @@ def gather_stock_data(sym):
   pe = info.get("trailingPE")
   if pe is not None and float(pe) < 0:
     pe = None
-  if pe is None and net_inc and shares and float(shares) > 0 and float(net_inc) > 0:
+  if (
+      pe is None
+      and net_inc
+      and shares
+      and float(shares) > 0
+      and float(net_inc) > 0
+  ):
     pe = price / (float(net_inc) / float(shares))
 
   fpe = info.get("forwardPE")
@@ -1062,7 +1108,7 @@ def gather_stock_data(sym):
   meta = resolve_company_meta(sym, info)
   entry = compute_entry_levels(hist, price, atr)
   halal = eval_halal(
-      sym, meta["raw_sec"], meta["raw_ind"], rev, int_inc, debt, cash, mcap, assets
+      sym, meta["raw_sec"], meta["raw_ind"], rev, int_inc, debt, cash, mcap
   )
 
   return {
@@ -1210,7 +1256,10 @@ def format_analysis_by_level(p, level):
   )
 
 
-def run_scanner():
+def run_scanner(force=False):
+  now = time.time()
+  if not force and (now - SCANNER_CACHE["ts"]) < SCANNER_CACHE_TTL:
+    return SCANNER_CACHE["items"]
   out = []
   for sym in SCAN_WATCHLIST:
     try:
@@ -1229,6 +1278,8 @@ def run_scanner():
         )
     except Exception:
       continue
+  SCANNER_CACHE["items"] = out
+  SCANNER_CACHE["ts"] = now
   return out
 
 
@@ -1399,11 +1450,12 @@ def handle_all(msg):
   if st.get("mode") == "help":
     bot.send_chat_action(cid, "typing")
     ans = generate_gemini_text(
-        f"Moliya va aksiyalar bo'yicha foydalanuvchiga tushunarli qilib javob"
-        f" ber (agar tahlil natijasi tashlangan bo'lsa, uni tahlil qilib"
+        "Moliya va aksiyalar bo'yicha foydalanuvchiga tushunarli qilib javob"
+        " ber (agar tahlil natijasi tashlangan bo'lsa, uni tahlil qilib"
         f" tushuntirib ber):\n{txt}"
     )
     safe_send(
+        cid,
         html.escape(ans) if ans else "Javob topilmadi.",
         reply_markup=get_main_keyboard(),
     )
