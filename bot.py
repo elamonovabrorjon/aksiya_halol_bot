@@ -60,7 +60,8 @@ GEMINI_API_KEY = _env("GEMINI_API_KEY")
 if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
   raise ValueError("TELEGRAM_TOKEN va GEMINI_API_KEY muhitda bo'lishi shart!")
 
-GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
+GEMINI_MODELS = ["gemini-3.5-flash-lite", "gemini-3-flash-preview"]
+
 ADMIN_ID = 745170275
 ADMIN_IDS = {ADMIN_ID}
 ADMIN_LINK = "EAA_7879"
